@@ -1,2 +1,22 @@
-#ignore the following
-build/
+# Build outputs
+**/bin/
+**/obj/
+**/build/
+*.exe
+*.dll
+*.pdb
+*.tlb
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Arduino
+*.elf
+*.hex
+
+# OS
+.DS_Store
+Thumbs.db

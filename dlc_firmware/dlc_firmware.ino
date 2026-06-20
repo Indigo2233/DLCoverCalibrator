@@ -45,15 +45,15 @@ const uint32_t timeToMoveCover = 5000;  //(ms) time it takes to move between ope
 //----- (UA) (COVER) PRIMARY SERVO PARAMETERS -----
 const uint16_t primaryServoMinPulseWidth = 500; //refer to servo manufacture for usec pulses and set accordingly
 const uint16_t primaryServoMaxPulseWidth = 2500; //refer to servo manufacture for usec pulses and set accordingly
-const uint8_t primaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-180), *may need to be adjusted based on the type of servo used
-const uint8_t primaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-180), *may need to be adjusted based on the type of servo used
+uint8_t primaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-180), *now adjustable via serial/ASCOM/INDI
+uint8_t primaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-180), *now adjustable via serial/ASCOM/INDI
 
 //----- (UA) (COVER) SECONDARY SERVO PARAMETERS -----
 //#define SECONDARY_SERVO_INSTALLED //uncomment if using additional servo
 const uint16_t secondaryServoMinPulseWidth = 500; //refer to servo manufacture for usec pulses and set accordingly
 const uint16_t secondaryServoMaxPulseWidth = 2500; //refer to servo manufacture for usec pulses and set accordingly
-const uint8_t secondaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-180), *may need to be adjusted based on the type of servo used
-const uint8_t secondaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-180), *may need to be adjusted based on the type of servo used
+uint8_t secondaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-180), *now adjustable via serial/ASCOM/INDI
+uint8_t secondaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-180), *now adjustable via serial/ASCOM/INDI
 
 //----- (UA) (COVER) SELECT A MOVEMENT -----
 //----- UNCOMMENT ONLY ONE OPTION, SEE MANUAL FOR DETAILS -----
@@ -100,12 +100,16 @@ const char* dlcVersion = "v1.2.0";
 #ifdef ENABLE_SAVING_TO_MEMORY
   #include <EEPROMWearLevel.h>
   #define EEPROM_LAYOUT_VERSION 1
-  #define AMOUNT_OF_INDEXES 4
+  #define AMOUNT_OF_INDEXES 8
   #define EEPROM_LENGTH_TOUSE 1023
   #define SAVED_COVER_STATE 0
   #define SAVED_PANEL_VALUE 1
   #define SAVED_BROADBAND_VALUE 2
   #define SAVED_NARROWBAND_VALUE 3
+  #define SAVED_PRIMARY_OPEN_ANGLE 4
+  #define SAVED_PRIMARY_CLOSE_ANGLE 5
+  #define SAVED_SECONDARY_OPEN_ANGLE 6
+  #define SAVED_SECONDARY_CLOSE_ANGLE 7
 #endif
 
 //----- PIN ASSIGNMENT -----
@@ -341,6 +345,16 @@ void initializeVariables(){
       if (currentCoverState <= 0) currentCoverState = 4; //set cover to 4:Unknown if no recorded state exists
     #endif
 
+    #ifdef COVER_INSTALLED
+      //load saved servo angles from EEPROM, use defaults (from UA section) if none stored
+      primaryServoOpenCoverAngle = EEPROMwl.get(SAVED_PRIMARY_OPEN_ANGLE, primaryServoOpenCoverAngle);
+      primaryServoCloseCoverAngle = EEPROMwl.get(SAVED_PRIMARY_CLOSE_ANGLE, primaryServoCloseCoverAngle);
+      #ifdef SECONDARY_SERVO_INSTALLED
+        secondaryServoOpenCoverAngle = EEPROMwl.get(SAVED_SECONDARY_OPEN_ANGLE, secondaryServoOpenCoverAngle);
+        secondaryServoCloseCoverAngle = EEPROMwl.get(SAVED_SECONDARY_CLOSE_ANGLE, secondaryServoCloseCoverAngle);
+      #endif
+    #endif
+
     #ifdef LIGHT_INSTALLED
       previousLightPanelValue = EEPROMwl.get(SAVED_PANEL_VALUE, previousLightPanelValue);
       broadbandValue = EEPROMwl.get(SAVED_BROADBAND_VALUE, broadbandValue);
@@ -509,6 +523,67 @@ void initializeVariables(){
           haltCover();
           respondToCommand(receivedChars);
           break;
+
+        //SET Primary Open Angle: UO<angle>
+        case 'U':
+          if (cmdParameter[0] == 'O') {
+            primaryServoOpenCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            #ifdef ENABLE_SAVING_TO_MEMORY
+              EEPROMwl.put(SAVED_PRIMARY_OPEN_ANGLE, primaryServoOpenCoverAngle);
+            #endif
+          }
+          //SET Primary Close Angle: UC<angle>
+          else if (cmdParameter[0] == 'C') {
+            primaryServoCloseCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            #ifdef ENABLE_SAVING_TO_MEMORY
+              EEPROMwl.put(SAVED_PRIMARY_CLOSE_ANGLE, primaryServoCloseCoverAngle);
+            #endif
+          }
+          respondToCommand(receivedChars);
+          break;
+
+        //SET Secondary Open/Close Angles: VO/V<angle>, VC<angle>
+        #ifdef SECONDARY_SERVO_INSTALLED
+        case 'V':
+          if (cmdParameter[0] == 'O') {
+            secondaryServoOpenCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            #ifdef ENABLE_SAVING_TO_MEMORY
+              EEPROMwl.put(SAVED_SECONDARY_OPEN_ANGLE, secondaryServoOpenCoverAngle);
+            #endif
+          }
+          else if (cmdParameter[0] == 'C') {
+            secondaryServoCloseCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            #ifdef ENABLE_SAVING_TO_MEMORY
+              EEPROMwl.put(SAVED_SECONDARY_CLOSE_ANGLE, secondaryServoCloseCoverAngle);
+            #endif
+          }
+          respondToCommand(receivedChars);
+          break;
+        #endif
+
+        //GET Primary Open Angle: uO
+        case 'u':
+          itoa(primaryServoOpenCoverAngle, response, 10);
+          respondToCommand(response);
+          break;
+
+        //GET Primary Close Angle: uC
+        case 'i':
+          itoa(primaryServoCloseCoverAngle, response, 10);
+          respondToCommand(response);
+          break;
+
+        //GET Secondary Open/Close Angles: vO, vC
+        #ifdef SECONDARY_SERVO_INSTALLED
+        case 'v':
+          if (cmdParameter[0] == 'O') {
+            itoa(secondaryServoOpenCoverAngle, response, 10);
+          } else {
+            itoa(secondaryServoCloseCoverAngle, response, 10);
+          }
+          respondToCommand(response);
+          break;
+        #endif
       #endif //COVER_INSTALLED
 
       //CalibratorState (reports # 0:NotPresent, 1:Off, 2:NotReady, 3:Ready, 4:Unknown, 5:Error)

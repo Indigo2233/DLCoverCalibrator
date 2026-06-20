@@ -68,6 +68,10 @@ bool DarkLight_CoverCalibrator::saveConfigItems(FILE *fp)
     DisableLightSP.save(fp);
     AutoHeatOnSP.save(fp);
     HeatOnCloseSP.save(fp);
+    PrimaryOpenAngleNP.save(fp);
+    PrimaryCloseAngleNP.save(fp);
+    SecondaryOpenAngleNP.save(fp);
+    SecondaryCloseAngleNP.save(fp);
 
     return true;
 }
@@ -99,6 +103,27 @@ bool DarkLight_CoverCalibrator::initProperties()
     MoveToSP[Halt].fill("Halt", "Halt", ISS_OFF);
     MoveToSP.fill(getDeviceName(), "MOVE_TO", "Cover", MAIN_CONTROL_TAB, IP_WO, ISR_ATMOST1, 60, IPS_IDLE);
     IDSnoopDevice(getDeviceName(), "MOVE_TO");
+
+    //primary servo open/close angles
+    double primaryOpenDefault = {0};
+    double primaryCloseDefault = {180};
+    double secondaryOpenDefault = {0};
+    double secondaryCloseDefault = {180};
+    IUGetConfigNumber(getDeviceName(), "PRIMARY_OPEN_ANGLE", "PRIMARY_OPEN_ANGLE", &primaryOpenDefault);
+    IUGetConfigNumber(getDeviceName(), "PRIMARY_CLOSE_ANGLE", "PRIMARY_CLOSE_ANGLE", &primaryCloseDefault);
+    IUGetConfigNumber(getDeviceName(), "SECONDARY_OPEN_ANGLE", "SECONDARY_OPEN_ANGLE", &secondaryOpenDefault);
+    IUGetConfigNumber(getDeviceName(), "SECONDARY_CLOSE_ANGLE", "SECONDARY_CLOSE_ANGLE", &secondaryCloseDefault);
+
+    PrimaryOpenAngleNP[0].fill("PRIMARY_OPEN_ANGLE", "Open Angle (0-180):", "%0.f", 0, 180, 1, primaryOpenDefault);
+    PrimaryOpenAngleNP.fill(getDeviceName(), "PRIMARY_OPEN_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
+    PrimaryCloseAngleNP[0].fill("PRIMARY_CLOSE_ANGLE", "Close Angle (0-180):", "%0.f", 0, 180, 1, primaryCloseDefault);
+    PrimaryCloseAngleNP.fill(getDeviceName(), "PRIMARY_CLOSE_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
+
+    //secondary servo open/close angles
+    SecondaryOpenAngleNP[0].fill("SECONDARY_OPEN_ANGLE", "2nd Open Angle (0-180):", "%0.f", 0, 180, 1, secondaryOpenDefault);
+    SecondaryOpenAngleNP.fill(getDeviceName(), "SECONDARY_OPEN_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
+    SecondaryCloseAngleNP[0].fill("SECONDARY_CLOSE_ANGLE", "2nd Close Angle (0-180):", "%0.f", 0, 180, 1, secondaryCloseDefault);
+    SecondaryCloseAngleNP.fill(getDeviceName(), "SECONDARY_CLOSE_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
 
     //----- CALIBRATOR CONTROL -----
     //calibrator state
@@ -289,6 +314,94 @@ bool DarkLight_CoverCalibrator::initProperties()
             LOG_WARN("Must connect first");
         }
     });//end of MoveToSP
+
+    //Primary Open Angle
+    PrimaryOpenAngleNP.onUpdate([this]
+    {
+        if (isConnected())
+        {
+            char AngleResponse[8] = {0};
+            char cmd[8];
+            snprintf(cmd, sizeof(cmd), "UO%d", static_cast<int>(PrimaryOpenAngleNP[0].getValue()));
+            if (sendCommand(cmd, AngleResponse))
+            {
+                LOGF_INFO("Primary open angle set to %d", static_cast<int>(PrimaryOpenAngleNP[0].getValue()));
+            }
+            else
+            {
+                LOG_WARN("Set primary open angle command failed");
+            }
+            PrimaryOpenAngleNP.setState(IPS_IDLE);
+            PrimaryOpenAngleNP.apply();
+        }
+        saveConfig();
+    });
+
+    //Primary Close Angle
+    PrimaryCloseAngleNP.onUpdate([this]
+    {
+        if (isConnected())
+        {
+            char AngleResponse[8] = {0};
+            char cmd[8];
+            snprintf(cmd, sizeof(cmd), "UC%d", static_cast<int>(PrimaryCloseAngleNP[0].getValue()));
+            if (sendCommand(cmd, AngleResponse))
+            {
+                LOGF_INFO("Primary close angle set to %d", static_cast<int>(PrimaryCloseAngleNP[0].getValue()));
+            }
+            else
+            {
+                LOG_WARN("Set primary close angle command failed");
+            }
+            PrimaryCloseAngleNP.setState(IPS_IDLE);
+            PrimaryCloseAngleNP.apply();
+        }
+        saveConfig();
+    });
+
+    //Secondary Open Angle
+    SecondaryOpenAngleNP.onUpdate([this]
+    {
+        if (isConnected())
+        {
+            char AngleResponse[8] = {0};
+            char cmd[8];
+            snprintf(cmd, sizeof(cmd), "VO%d", static_cast<int>(SecondaryOpenAngleNP[0].getValue()));
+            if (sendCommand(cmd, AngleResponse))
+            {
+                LOGF_INFO("Secondary open angle set to %d", static_cast<int>(SecondaryOpenAngleNP[0].getValue()));
+            }
+            else
+            {
+                LOG_WARN("Set secondary open angle command failed");
+            }
+            SecondaryOpenAngleNP.setState(IPS_IDLE);
+            SecondaryOpenAngleNP.apply();
+        }
+        saveConfig();
+    });
+
+    //Secondary Close Angle
+    SecondaryCloseAngleNP.onUpdate([this]
+    {
+        if (isConnected())
+        {
+            char AngleResponse[8] = {0};
+            char cmd[8];
+            snprintf(cmd, sizeof(cmd), "VC%d", static_cast<int>(SecondaryCloseAngleNP[0].getValue()));
+            if (sendCommand(cmd, AngleResponse))
+            {
+                LOGF_INFO("Secondary close angle set to %d", static_cast<int>(SecondaryCloseAngleNP[0].getValue()));
+            }
+            else
+            {
+                LOG_WARN("Set secondary close angle command failed");
+            }
+            SecondaryCloseAngleNP.setState(IPS_IDLE);
+            SecondaryCloseAngleNP.apply();
+        }
+        saveConfig();
+    });
 
     //CalibratorOn/Off
     TurnLightSP.onUpdate([this]
@@ -816,6 +929,44 @@ bool DarkLight_CoverCalibrator::updateProperties()
         {
             defineProperty(CoverStateTP);
             defineProperty(MoveToSP);
+
+            //get and sync servo angles between INDI config and device
+            char AngleResponse[8] = {0};
+            char AngleCmd[8];
+            //sync primary open angle: push saved INDI value to device, then read back
+            snprintf(AngleCmd, sizeof(AngleCmd), "UO%d", static_cast<int>(PrimaryOpenAngleNP[0].getValue()));
+            sendCommand(AngleCmd, AngleResponse);
+            if (sendCommand("uO", AngleResponse) && AngleResponse[0] != '?')
+            {
+                PrimaryOpenAngleNP[0].setValue(std::stod(AngleResponse));
+            }
+            //sync primary close angle
+            snprintf(AngleCmd, sizeof(AngleCmd), "UC%d", static_cast<int>(PrimaryCloseAngleNP[0].getValue()));
+            sendCommand(AngleCmd, AngleResponse);
+            if (sendCommand("i", AngleResponse) && AngleResponse[0] != '?')
+            {
+                PrimaryCloseAngleNP[0].setValue(std::stod(AngleResponse));
+            }
+            defineProperty(PrimaryOpenAngleNP);
+            defineProperty(PrimaryCloseAngleNP);
+
+            //secondary servo may not be installed — device returns '?' in that case
+            snprintf(AngleCmd, sizeof(AngleCmd), "VO%d", static_cast<int>(SecondaryOpenAngleNP[0].getValue()));
+            sendCommand(AngleCmd, AngleResponse);
+            if (sendCommand("vO", AngleResponse) && AngleResponse[0] != '?')
+            {
+                SecondaryOpenAngleNP[0].setValue(std::stod(AngleResponse));
+                defineProperty(SecondaryOpenAngleNP);
+                SecondaryOpenAngleNP.apply();
+            }
+            snprintf(AngleCmd, sizeof(AngleCmd), "VC%d", static_cast<int>(SecondaryCloseAngleNP[0].getValue()));
+            sendCommand(AngleCmd, AngleResponse);
+            if (sendCommand("vC", AngleResponse) && AngleResponse[0] != '?')
+            {
+                SecondaryCloseAngleNP[0].setValue(std::stod(AngleResponse));
+                defineProperty(SecondaryCloseAngleNP);
+                SecondaryCloseAngleNP.apply();
+            }
         }
         else
         {

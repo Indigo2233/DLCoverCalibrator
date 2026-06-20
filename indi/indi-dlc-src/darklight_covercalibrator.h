@@ -95,6 +95,10 @@ class DarkLight_CoverCalibrator : public INDI::DefaultDevice
         INDI::PropertyText CoverStateTP {1};
         INDI::PropertySwitch MoveToSP {3};
         enum {Open, Close, Halt};
+        INDI::PropertyNumber PrimaryOpenAngleNP {1};
+        INDI::PropertyNumber PrimaryCloseAngleNP {1};
+        INDI::PropertyNumber SecondaryOpenAngleNP {1};
+        INDI::PropertyNumber SecondaryCloseAngleNP {1};
 
         //----- light -----
         INDI::PropertySwitch AutoOnSP {1};
