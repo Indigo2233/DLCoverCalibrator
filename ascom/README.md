@@ -2,6 +2,8 @@
 
 This is the ASCOM-compatible driver and application for the **DarkLight Cover Calibrator (DLC)**. It provides full support for Windows-based astronomy applications that use the ASCOM platform.
 
+> 🆕 **Custom Open-Source Driver**: See [DarkLightDriver/](DarkLightDriver/) for a from-scratch, open-source ASCOM driver with **configurable servo open/close angles** — no more firmware flashing to adjust angles!
+
 ---
 
 ## 🔖 Firmware Version
