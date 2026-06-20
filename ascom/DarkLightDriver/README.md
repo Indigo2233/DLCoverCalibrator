@@ -38,24 +38,38 @@ dotnet build -c Release
 
 ## 配置（Setup 界面）
 
-在 ASCOM Chooser 中选中 "DarkLight Cover Calibrator"，点击 **Properties**：
+在 ASCOM Chooser 中选中 "DarkLight Cover Calibrator"，点击 **Properties**。
 
-### Serial Connection
-- **COM Port** — 选择设备串口（可点击 ↻ 刷新）
-- **Baud Rate** — 默认 115200（与固件一致）
+界面采用 **Gemini FlatPanel 风格**，支持连接设备后的**实时角度微调**：
 
-### Primary Servo Angles（主舵机角度）
-- **Open Angle** — 开盖时舵机目标角度 (0–180°)
-- **Close Angle** — 关盖时舵机目标角度 (0–180°)
+### Serial Connection（顶部工具栏）
+- **COM Port** — 下拉选择 + ↻ 刷新
+- **Baud Rate** — 9600~230400
+- 连接状态指示灯 + 固件版本显示
 
-### Secondary Servo Angles（副舵机角度）
-- **Open Angle** — 副舵机开盖角度 (0–180°)
-- **Close Angle** — 副舵机关盖角度 (0–180°)
+### Panel 1 / Panel 2（主/副舵机）
 
-> 如果固件未编译 `SECONDARY_SERVO_INSTALLED`，副舵机命令会返回 `?`，不影响正常使用。
+每个面板包含两组控制：
 
-### Polling
-- **Poll Interval** — 状态轮询间隔 (ms)，默认 1000ms
+**关闭方向** (橙色)
+- 当前角度值（大字体）+ **±1° / ±10° / ±45°** 实时微调
+- 「设为关闭位置」一键保存当前位置
+
+**打开方向** (绿色)
+- 当前角度值（大字体）+ **±1° / ±10° / ±45°** 实时微调
+- 「设为打开位置」一键保存当前位置
+
+> 如果固件未编译 `SECONDARY_SERVO_INSTALLED`，副舵机 jog 命令返回 `?`，不影响使用。
+
+### 底部按钮
+- **重设** — 恢复默认角度（开=0° 关=180°）
+- **Done** — 保存并关闭
+
+### 实时微调工作流
+1. 连接设备后打开 Setup 界面
+2. 点击 ±1°/±10°/±45° 按钮实时移动舵机到位
+3. 点击「设为关闭/打开位置」保存
+4. 角度自动写入固件 EEPROM，断电不丢失
 
 ## 卸载
 
@@ -71,10 +85,12 @@ dotnet build -c Release
 | `P` | 查询盖子状态 |
 | `L` / `B` / `M` | 查询平场板状态 / 亮度 / 最大亮度 |
 | `T<值>` / `F` | 开平场板 / 关平场板 |
-| `UO<角度>` / `UC<角度>` | 设置主舵机开/关角度 |
+| `UO<角度>` / `UC<角度>` | 设置主舵机开/关角度（写入 EEPROM） |
 | `VO<角度>` / `VC<角度>` | 设置副舵机开/关角度 |
 | `uO` / `i` | 查询主舵机开/关角度 |
 | `vO` / `vC` | 查询副舵机开/关角度 |
+| `J<角度>` / `j` | 🆕 Jog 主舵机直驱 / 查询当前位置 |
+| `K<角度>` / `k` | 🆕 Jog 副舵机直驱 / 查询当前位置 |
 | `Z` | 握手（返回 `?`） |
 | `V` | 查询固件版本 |
 

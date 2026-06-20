@@ -39,3 +39,30 @@
 | `vO` / `vC` | 查询副舵机开/关角度 |
 
 详见 [串口协议文档](protocol.md)。
+
+## 2025-06 — Gemini FlatPanel 风格配置界面 + Jog 直驱
+
+### 新增
+
+#### 固件
+- 新增 `J<angle>` / `j` 命令：主舵机直驱到指定角度 / 查询当前位置
+- 新增 `K<angle>` / `k` 命令：副舵机直驱 / 查询当前位置
+- Jog 不改变保存的开合角度，适用于实时微调
+
+#### ASCOM 驱动
+- **全新 Gemini FlatPanel 风格 Setup 界面**：
+  - 双面板布局（主舵机 / 副舵机）
+  - 关闭方向 / 打开方向 两组控制
+  - ±1° / ±10° / ±45° 实时微调按钮
+  - 「设为关闭位置」「设为打开位置」一键保存
+  - 连接状态指示 + 固件版本显示
+  - 重设按钮恢复默认角度
+  - 深色主题 UI
+- 新增 `JogPrimary()`、`JogSecondary()`、`GetPrimaryPosition()`、`GetSecondaryPosition()` 方法
+- 新增 `SetCurrentAsOpen()`、`SetCurrentAsClose()` 快捷方法
+
+### 使用方式
+1. 连接设备后打开 Properties → Setup 界面
+2. 点 ±1°/±10°/±45° 实时看舵机移动
+3. 到位后点「设为关闭/打开位置」保存
+4. Done 关闭，角度已写入 EEPROM
