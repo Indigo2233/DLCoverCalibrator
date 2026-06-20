@@ -486,6 +486,68 @@ namespace DarkLight.CoverCalibrator
         public int SecondaryOpenAngle => _secondaryOpenAngle;
         public int SecondaryCloseAngle => _secondaryCloseAngle;
 
+        /// <summary>Jog primary servo directly to a raw angle (0-180). Requires connected.</summary>
+        public int JogPrimary(int angle)
+        {
+            angle = Clamp(angle, 0, 180);
+            if (_connected)
+            {
+                var resp = _device.SendCommand($"J{angle}");
+                LogMessage("JogPrimary", $"angle={angle} resp={resp}");
+            }
+            return angle;
+        }
+
+        /// <summary>Get primary servo current physical position. Requires connected.</summary>
+        public int GetPrimaryPosition()
+        {
+            if (!_connected) return _primaryCloseAngle;
+            var resp = _device.SendCommand("j");
+            if (resp != null && int.TryParse(resp, out int pos))
+                return pos;
+            return _primaryCloseAngle;
+        }
+
+        /// <summary>Jog secondary servo directly to a raw angle (0-180). Requires connected.</summary>
+        public int JogSecondary(int angle)
+        {
+            angle = Clamp(angle, 0, 180);
+            if (_connected)
+            {
+                var resp = _device.SendCommand($"K{angle}");
+                LogMessage("JogSecondary", $"angle={angle} resp={resp}");
+            }
+            return angle;
+        }
+
+        /// <summary>Get secondary servo current physical position. Requires connected.</summary>
+        public int GetSecondaryPosition()
+        {
+            if (!_connected) return _secondaryCloseAngle;
+            var resp = _device.SendCommand("k");
+            if (resp != null && int.TryParse(resp, out int pos))
+                return pos;
+            return _secondaryCloseAngle;
+        }
+
+        /// <summary>Save current servo position as the new open angle.</summary>
+        public void SetCurrentAsOpen()
+        {
+            if (!_connected) return;
+            var pos = GetPrimaryPosition();
+            SetPrimaryOpenAngle(pos);
+            LogMessage("SetCurrentAsOpen", $"angle={pos}");
+        }
+
+        /// <summary>Save current servo position as the new close angle.</summary>
+        public void SetCurrentAsClose()
+        {
+            if (!_connected) return;
+            var pos = GetPrimaryPosition();
+            SetPrimaryCloseAngle(pos);
+            LogMessage("SetCurrentAsClose", $"angle={pos}");
+        }
+
         public string PortName
         {
             get => _portName;

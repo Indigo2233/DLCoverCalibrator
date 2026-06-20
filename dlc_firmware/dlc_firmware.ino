@@ -584,6 +584,34 @@ void initializeVariables(){
           respondToCommand(response);
           break;
         #endif
+
+        //JOG primary servo to raw angle: J<angle>
+        case 'J':
+          jogPrimaryServo(constrain(atoi(cmdParameter), 0, 180));
+          respondToCommand(receivedChars);
+          break;
+
+        //GET primary servo current position: j
+        case 'j':
+          itoa(primaryServoLastPosition, response, 10);
+          respondToCommand(response);
+          break;
+
+        //JOG secondary servo: K<angle>
+        #ifdef SECONDARY_SERVO_INSTALLED
+        case 'K':
+          jogSecondaryServo(constrain(atoi(cmdParameter), 0, 180));
+          respondToCommand(receivedChars);
+          break;
+        #endif
+
+        //GET secondary servo current position: k
+        #ifdef SECONDARY_SERVO_INSTALLED
+        case 'k':
+          itoa(secondaryServoLastPosition, response, 10);
+          respondToCommand(response);
+          break;
+        #endif
       #endif //COVER_INSTALLED
 
       //CalibratorState (reports # 0:NotPresent, 1:Off, 2:NotReady, 3:Ready, 4:Unknown, 5:Error)
@@ -954,6 +982,25 @@ void initializeVariables(){
       setDetachTimer();
     }
   }//end of haltCover
+
+  //Jog: directly move servo to an angle without changing cover state or saved angles
+  void jogPrimaryServo(uint8_t angle){
+    detachServo = false;
+    attachServo();
+    primaryServo.write(angle);
+    primaryServoLastPosition = angle;
+    setDetachTimer();
+  }//end of jogPrimaryServo
+
+  #ifdef SECONDARY_SERVO_INSTALLED
+  void jogSecondaryServo(uint8_t angle){
+    detachServo = false;
+    attachServo();
+    secondaryServo.write(angle);
+    secondaryServoLastPosition = angle;
+    setDetachTimer();
+  }//end of jogSecondaryServo
+  #endif
 
   void attachServo(){
     primaryServo.attach(primeServo, primaryServoMinPulseWidth, primaryServoMaxPulseWidth);
