@@ -45,15 +45,15 @@ const uint32_t timeToMoveCover = 5000;  //(ms) time it takes to move between ope
 //----- (UA) (COVER) PRIMARY SERVO PARAMETERS -----
 const uint16_t primaryServoMinPulseWidth = 500; //refer to servo manufacture for usec pulses and set accordingly
 const uint16_t primaryServoMaxPulseWidth = 2500; //refer to servo manufacture for usec pulses and set accordingly
-uint8_t primaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-180), *now adjustable via serial/ASCOM/INDI
-uint8_t primaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-180), *now adjustable via serial/ASCOM/INDI
+uint16_t primaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-270), *now adjustable via serial/ASCOM/INDI
+uint16_t primaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-270), *now adjustable via serial/ASCOM/INDI
 
 //----- (UA) (COVER) SECONDARY SERVO PARAMETERS -----
 //#define SECONDARY_SERVO_INSTALLED //uncomment if using additional servo
 const uint16_t secondaryServoMinPulseWidth = 500; //refer to servo manufacture for usec pulses and set accordingly
 const uint16_t secondaryServoMaxPulseWidth = 2500; //refer to servo manufacture for usec pulses and set accordingly
-uint8_t secondaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-180), *now adjustable via serial/ASCOM/INDI
-uint8_t secondaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-180), *now adjustable via serial/ASCOM/INDI
+uint16_t secondaryServoOpenCoverAngle = 0; //position angle servo opens to, value between (0-270), *now adjustable via serial/ASCOM/INDI
+uint16_t secondaryServoCloseCoverAngle = 180; //position angle servo closes to, value between (0-270), *now adjustable via serial/ASCOM/INDI
 
 //----- (UA) (COVER) SELECT A MOVEMENT -----
 //----- UNCOMMENT ONLY ONE OPTION, SEE MANUAL FOR DETAILS -----
@@ -92,6 +92,9 @@ const uint32_t debounceDelay = 150; //(ms) debounce time for the buttons *may ne
 //-------------- DO NOT EDIT BELOW --------------
 //-----------------------------------------------
 //------------ VARIABLE DECLARATION -------------
+
+// Map 0-270° to us pulse width (Arduino Servo.write() caps at 180°, use writeMicroseconds)
+#define SERVO_US(angle, minPw, maxPw) map(constrain(angle, 0, 270), 0, 270, minPw, maxPw)
 
 //----- VERSIONING CONTROL -----
 const char* dlcVersion = "v1.2.0";
@@ -396,22 +399,22 @@ void initializeVariables(){
   #ifdef COVER_INSTALLED
     //if panel in open position at start leave in position
     if (currentCoverState == 3){
-      primaryServo.write(primaryServoOpenCoverAngle);
+      primaryServo.writeMicroseconds(SERVO_US(primaryServoOpenCoverAngle, primaryServoMinPulseWidth, primaryServoMaxPulseWidth));
       primaryServoLastPosition = primaryServoOpenCoverAngle;
 
       #ifdef SECONDARY_SERVO_INSTALLED
-        secondaryServo.write(secondaryServoOpenCoverAngle);
+        secondaryServo.writeMicroseconds(SERVO_US(secondaryServoOpenCoverAngle, secondaryServoMinPulseWidth, secondaryServoMaxPulseWidth));
         secondaryServoLastPosition = secondaryServoOpenCoverAngle;
       #endif
       currentCoverState = 3;
     }
     //if panel in any other position, move to close for known starting point
     else {
-      primaryServo.write(primaryServoCloseCoverAngle);
+      primaryServo.writeMicroseconds(SERVO_US(primaryServoCloseCoverAngle, primaryServoMinPulseWidth, primaryServoMaxPulseWidth));
       primaryServoLastPosition = primaryServoCloseCoverAngle;
 
       #ifdef SECONDARY_SERVO_INSTALLED
-        secondaryServo.write(secondaryServoCloseCoverAngle);
+        secondaryServo.writeMicroseconds(SERVO_US(secondaryServoCloseCoverAngle, secondaryServoMinPulseWidth, secondaryServoMaxPulseWidth));
         secondaryServoLastPosition = secondaryServoCloseCoverAngle;
       #endif
       currentCoverState = 1;
@@ -527,14 +530,14 @@ void initializeVariables(){
         //SET Primary Open Angle: UO<angle>
         case 'U':
           if (cmdParameter[0] == 'O') {
-            primaryServoOpenCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            primaryServoOpenCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 270);
             #ifdef ENABLE_SAVING_TO_MEMORY
               EEPROMwl.put(SAVED_PRIMARY_OPEN_ANGLE, primaryServoOpenCoverAngle);
             #endif
           }
           //SET Primary Close Angle: UC<angle>
           else if (cmdParameter[0] == 'C') {
-            primaryServoCloseCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            primaryServoCloseCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 270);
             #ifdef ENABLE_SAVING_TO_MEMORY
               EEPROMwl.put(SAVED_PRIMARY_CLOSE_ANGLE, primaryServoCloseCoverAngle);
             #endif
@@ -546,13 +549,13 @@ void initializeVariables(){
         #ifdef SECONDARY_SERVO_INSTALLED
         case 'V':
           if (cmdParameter[0] == 'O') {
-            secondaryServoOpenCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            secondaryServoOpenCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 270);
             #ifdef ENABLE_SAVING_TO_MEMORY
               EEPROMwl.put(SAVED_SECONDARY_OPEN_ANGLE, secondaryServoOpenCoverAngle);
             #endif
           }
           else if (cmdParameter[0] == 'C') {
-            secondaryServoCloseCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 180);
+            secondaryServoCloseCoverAngle = constrain(atoi(&cmdParameter[1]), 0, 270);
             #ifdef ENABLE_SAVING_TO_MEMORY
               EEPROMwl.put(SAVED_SECONDARY_CLOSE_ANGLE, secondaryServoCloseCoverAngle);
             #endif
@@ -587,7 +590,7 @@ void initializeVariables(){
 
         //JOG primary servo to raw angle: J<angle>
         case 'J':
-          jogPrimaryServo(constrain(atoi(cmdParameter), 0, 180));
+          jogPrimaryServo(constrain(atoi(cmdParameter), 0, 270));
           respondToCommand(receivedChars);
           break;
 
@@ -600,7 +603,7 @@ void initializeVariables(){
         //JOG secondary servo: K<angle>
         #ifdef SECONDARY_SERVO_INSTALLED
         case 'K':
-          jogSecondaryServo(constrain(atoi(cmdParameter), 0, 180));
+          jogSecondaryServo(constrain(atoi(cmdParameter), 0, 270));
           respondToCommand(receivedChars);
           break;
         #endif
@@ -984,19 +987,19 @@ void initializeVariables(){
   }//end of haltCover
 
   //Jog: directly move servo to an angle without changing cover state or saved angles
-  void jogPrimaryServo(uint8_t angle){
+  void jogPrimaryServo(uint16_t angle){
     detachServo = false;
     attachServo();
-    primaryServo.write(angle);
+    primaryServo.writeMicroseconds(SERVO_US(angle, primaryServoMinPulseWidth, primaryServoMaxPulseWidth));
     primaryServoLastPosition = angle;
     setDetachTimer();
   }//end of jogPrimaryServo
 
   #ifdef SECONDARY_SERVO_INSTALLED
-  void jogSecondaryServo(uint8_t angle){
+  void jogSecondaryServo(uint16_t angle){
     detachServo = false;
     attachServo();
-    secondaryServo.write(angle);
+    secondaryServo.writeMicroseconds(SERVO_US(angle, secondaryServoMinPulseWidth, secondaryServoMaxPulseWidth));
     secondaryServoLastPosition = angle;
     setDetachTimer();
   }//end of jogSecondaryServo
@@ -1036,7 +1039,7 @@ void initializeVariables(){
     
     #ifdef USE_LINEAR
       if (!halt){
-        primaryServoLastPosition = primaryServo.read();
+        // primaryServoLastPosition already tracked from last move/jog, no need for Servo.read()
       }
       else {
         if (moveCoverTo != previousMoveCoverTo) {
@@ -1090,27 +1093,27 @@ void initializeVariables(){
         float progress = (float)(currentServoTimer - startServoTimer + elapsedMoveTime) / timeToMoveCover;
         progress = constrain(progress, 0.0, 1.0); //stay within bounds
 
-        uint8_t primaryServoPreviousCoverAngle;  
-        uint8_t primaryServoTargetPosition = (moveCoverTo == 3) ? primaryServoOpenCoverAngle : primaryServoCloseCoverAngle;
+        uint16_t primaryServoPreviousCoverAngle;  
+        uint16_t primaryServoTargetPosition = (moveCoverTo == 3) ? primaryServoOpenCoverAngle : primaryServoCloseCoverAngle;
 
         #ifdef SECONDARY_SERVO_INSTALLED
-          uint8_t secondaryServoPreviousCoverAngle;  
-          uint8_t secondaryServoTargetPosition = (moveCoverTo == 3) ? secondaryServoOpenCoverAngle : secondaryServoCloseCoverAngle;
+          uint16_t secondaryServoPreviousCoverAngle;  
+          uint16_t secondaryServoTargetPosition = (moveCoverTo == 3) ? secondaryServoOpenCoverAngle : secondaryServoCloseCoverAngle;
         #endif
 
-        uint8_t primaryServoCurrentCoverAngle = calculateServoPosition(currentServoTimer, startServoTimer, primaryServoLastPosition, primaryServoTargetPosition, progress, primaryServoRemainingDistance, primaryServoOpenCoverAngle, primaryServoCloseCoverAngle);
+        uint16_t primaryServoCurrentCoverAngle = calculateServoPosition(currentServoTimer, startServoTimer, primaryServoLastPosition, primaryServoTargetPosition, progress, primaryServoRemainingDistance, primaryServoOpenCoverAngle, primaryServoCloseCoverAngle);
         #ifdef SECONDARY_SERVO_INSTALLED
-          uint8_t secondaryServoCurrentCoverAngle = calculateServoPosition(currentServoTimer, startServoTimer, secondaryServoLastPosition, secondaryServoTargetPosition, progress, secondaryServoRemainingDistance, secondaryServoOpenCoverAngle, secondaryServoCloseCoverAngle);
+          uint16_t secondaryServoCurrentCoverAngle = calculateServoPosition(currentServoTimer, startServoTimer, secondaryServoLastPosition, secondaryServoTargetPosition, progress, secondaryServoRemainingDistance, secondaryServoOpenCoverAngle, secondaryServoCloseCoverAngle);
         #endif
   
         if (primaryServoCurrentCoverAngle != primaryServoPreviousCoverAngle) {
-          primaryServo.write(primaryServoCurrentCoverAngle);
+          primaryServo.writeMicroseconds(SERVO_US(primaryServoCurrentCoverAngle, primaryServoMinPulseWidth, primaryServoMaxPulseWidth));
           primaryServoPreviousCoverAngle = primaryServoCurrentCoverAngle;
         }
 
         #ifdef SECONDARY_SERVO_INSTALLED
           if (secondaryServoCurrentCoverAngle != secondaryServoPreviousCoverAngle) {
-            secondaryServo.write(secondaryServoCurrentCoverAngle);
+            secondaryServo.writeMicroseconds(SERVO_US(secondaryServoCurrentCoverAngle, secondaryServoMinPulseWidth, secondaryServoMaxPulseWidth));
             secondaryServoPreviousCoverAngle = secondaryServoCurrentCoverAngle;
           }
         #endif
