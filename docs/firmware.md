@@ -35,8 +35,8 @@ const uint16_t primaryServoMinPulseWidth = 500;   // μs
 const uint16_t primaryServoMaxPulseWidth = 2500;  // μs
 
 // 开合角度 — 可通过 ASCOM/INDI 实时修改，自动保存到 EEPROM
-uint8_t primaryServoOpenCoverAngle = 0;    // 开盖角度 (0–180)
-uint8_t primaryServoCloseCoverAngle = 180; // 关盖角度 (0–180)
+uint16_t primaryServoOpenCoverAngle = 0;    // 开盖角度 (0–270)
+uint16_t primaryServoCloseCoverAngle = 180; // 关盖角度 (0–270)
 ```
 
 ### 盖子移动
@@ -84,9 +84,9 @@ const float deltaPoint = 5.0;             // 目标温度高于环境温度 (°C
 
 不再需要修改固件重新烧录！通过 ASCOM Setup 界面或 INDI Options 面板直接修改角度：
 
-- **主舵机开盖角度** (`UO<N>`) — 0–180°
-- **主舵机关盖角度** (`UC<N>`) — 0–180°
-- **副舵机开盖角度** (`VO<N>`) — 0–180°（需启用副舵机）
-- **副舵机关盖角度** (`VC<N>`) — 0–180°（需启用副舵机）
+- **主舵机开盖角度** (`UO<N>`) — 0–270°
+- **主舵机关盖角度** (`UC<N>`) — 0–270°
+- **副舵机开盖角度** (`VO<N>`) — 0–270°（需启用副舵机）
+- **副舵机关盖角度** (`VC<N>`) — 0–270°（需启用副舵机）
 
 修改后自动保存到 EEPROM，断电不丢失。

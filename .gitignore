@@ -2,10 +2,30 @@
 **/bin/
 **/obj/
 **/build/
+**/dist/
+**/out/
+**/publish/
 *.exe
 *.dll
 *.pdb
 *.tlb
+*.msi
+*.cab
+*.zip
+*.7z
+*.nupkg
+*.snupkg
+
+# .NET / test artifacts
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Installer tooling
+*.wixpdb
+*.wixobj
+*.log
 
 # IDE
 .vs/

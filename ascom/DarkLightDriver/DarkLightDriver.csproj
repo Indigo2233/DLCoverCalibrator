@@ -8,16 +8,27 @@
     <AssemblyName>DarkLight.CoverCalibrator</AssemblyName>
     <RootNamespace>DarkLight.CoverCalibrator</RootNamespace>
     <Description>DarkLight Cover Calibrator ASCOM Driver</Description>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
+    <LangVersion>8.0</LangVersion>
+    <ASCOM_COMPONENT_PATH Condition="'$(ASCOM_ROOT)' != ''">$(ASCOM_ROOT)</ASCOM_COMPONENT_PATH>
+    <ASCOM_COMPONENT_PATH Condition="'$(ASCOM_COMPONENT_PATH)' == ''">C:\Program Files (x86)\ASCOM\Developer\Components\Platform</ASCOM_COMPONENT_PATH>
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="ASCOM.DeviceInterface">
-      <HintPath>$(ASCOM_ROOT)\ASCOM.DeviceInterface.dll</HintPath>
+    <Reference Include="ASCOM.Attributes">
+      <HintPath>$(ASCOM_COMPONENT_PATH)\ASCOM.Attributes.dll</HintPath>
+      <SpecificVersion>False</SpecificVersion>
+    </Reference>
+    <Reference Include="ASCOM.DeviceInterfaces">
+      <HintPath>$(ASCOM_COMPONENT_PATH)\ASCOM.DeviceInterfaces.dll</HintPath>
+      <SpecificVersion>False</SpecificVersion>
+    </Reference>
+    <Reference Include="ASCOM.Exceptions">
+      <HintPath>$(ASCOM_COMPONENT_PATH)\ASCOM.Exceptions.dll</HintPath>
       <SpecificVersion>False</SpecificVersion>
     </Reference>
     <Reference Include="ASCOM.Utilities">
-      <HintPath>$(ASCOM_ROOT)\ASCOM.Utilities.dll</HintPath>
+      <HintPath>$(ASCOM_COMPONENT_PATH)\ASCOM.Utilities.dll</HintPath>
       <SpecificVersion>False</SpecificVersion>
     </Reference>
   </ItemGroup>

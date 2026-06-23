@@ -15,16 +15,33 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-set "FRAMEWORK=%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319"
-if not exist "%FRAMEWORK%\RegAsm.exe" (
-    set "FRAMEWORK=%SystemRoot%\Microsoft.NET\Framework\v4.0.30319"
+set "DRIVER_DLL=%~dp0DarkLight.CoverCalibrator.dll"
+if not exist "%DRIVER_DLL%" (
+    set "DRIVER_DLL=%~dp0bin\Release\net48\DarkLight.CoverCalibrator.dll"
 )
 
-echo Unregistering driver from COM...
-"%FRAMEWORK%\RegAsm.exe" "%~dp0DarkLight.CoverCalibrator.dll" /unregister
+if not exist "%DRIVER_DLL%" (
+    echo [ERROR] DarkLight.CoverCalibrator.dll not found.
+    pause
+    exit /b 1
+)
+
+set "REGASM32=%SystemRoot%\Microsoft.NET\Framework\v4.0.30319\RegAsm.exe"
+set "REGASM64=%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe"
+
+echo Unregistering 32-bit COM driver...
+"%REGASM32%" "%DRIVER_DLL%" /unregister
 
 if %errorlevel% neq 0 (
-    echo [WARNING] Unregister returned error. Driver may already be unregistered.
+    echo [WARNING] 32-bit unregister returned error. Driver may already be unregistered.
+)
+
+if exist "%REGASM64%" (
+    echo Unregistering 64-bit COM driver...
+    "%REGASM64%" "%DRIVER_DLL%" /unregister
+    if %errorlevel% neq 0 (
+        echo [WARNING] 64-bit unregister returned error. Driver may already be unregistered.
+    )
 )
 
 echo Done.

@@ -66,12 +66,12 @@ Uninstall.bat
 - **Baud Rate** — 9600 / 19200 / 38400 / 57600 / **115200** / 230400
 
 ### Primary Servo Angles
-- **Open Angle** — 开盖时舵机目标角度 (0–180°)
-- **Close Angle** — 关盖时舵机目标角度 (0–180°)
+- **Open Angle** — 开盖时舵机目标角度 (0–270°)
+- **Close Angle** — 关盖时舵机目标角度 (0–270°)
 
 ### Secondary Servo Angles
-- **Open Angle** — 副舵机开盖角度 (0–180°)
-- **Close Angle** — 副舵机关盖角度 (0–180°)
+- **Open Angle** — 副舵机开盖角度 (0–270°)
+- **Close Angle** — 副舵机关盖角度 (0–270°)
 
 ### Polling
 - **Poll Interval** — 状态轮询间隔 (500–10000 ms)
