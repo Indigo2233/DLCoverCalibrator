@@ -96,7 +96,13 @@ class DarkLight_CoverCalibrator : public INDI::DefaultDevice
         INDI::PropertySwitch MoveToSP {3};
         enum {Open, Close, Halt};
         INDI::PropertyNumber PrimaryOpenAngleNP {1};
+        INDI::PropertySwitch PrimaryJogStepSP {6};
+        enum {Jog_m45, Jog_m10, Jog_m1, Jog_p1, Jog_p10, Jog_p45};
+        INDI::PropertySwitch PrimaryJogOpenBtn {1};
+        INDI::PropertySwitch PrimaryJogCloseBtn {1};
+        INDI::PropertySwitch PrimaryOpenSetPos {1};
         INDI::PropertyNumber PrimaryCloseAngleNP {1};
+        INDI::PropertySwitch PrimaryCloseSetPos {1};
         INDI::PropertyNumber SecondaryOpenAngleNP {1};
         INDI::PropertyNumber SecondaryCloseAngleNP {1};
 

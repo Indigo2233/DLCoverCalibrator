@@ -114,16 +114,36 @@ bool DarkLight_CoverCalibrator::initProperties()
     IUGetConfigNumber(getDeviceName(), "SECONDARY_OPEN_ANGLE", "SECONDARY_OPEN_ANGLE", &secondaryOpenDefault);
     IUGetConfigNumber(getDeviceName(), "SECONDARY_CLOSE_ANGLE", "SECONDARY_CLOSE_ANGLE", &secondaryCloseDefault);
 
-    PrimaryOpenAngleNP[0].fill("PRIMARY_OPEN_ANGLE", "Open Angle (0-180):", "%0.f", 0, 180, 1, primaryOpenDefault);
+    PrimaryOpenAngleNP[0].fill("PRIMARY_OPEN_ANGLE", "Open Angle (0-270):", "%0.f", 0, 270, 1, primaryOpenDefault);
     PrimaryOpenAngleNP.fill(getDeviceName(), "PRIMARY_OPEN_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
-    PrimaryCloseAngleNP[0].fill("PRIMARY_CLOSE_ANGLE", "Close Angle (0-180):", "%0.f", 0, 180, 1, primaryCloseDefault);
+    PrimaryCloseAngleNP[0].fill("PRIMARY_CLOSE_ANGLE", "Close Angle (0-270):", "%0.f", 0, 270, 1, primaryCloseDefault);
     PrimaryCloseAngleNP.fill(getDeviceName(), "PRIMARY_CLOSE_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
 
     //secondary servo open/close angles
-    SecondaryOpenAngleNP[0].fill("SECONDARY_OPEN_ANGLE", "2nd Open Angle (0-180):", "%0.f", 0, 180, 1, secondaryOpenDefault);
+    SecondaryOpenAngleNP[0].fill("SECONDARY_OPEN_ANGLE", "2nd Open Angle (0-270):", "%0.f", 0, 270, 1, secondaryOpenDefault);
     SecondaryOpenAngleNP.fill(getDeviceName(), "SECONDARY_OPEN_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
-    SecondaryCloseAngleNP[0].fill("SECONDARY_CLOSE_ANGLE", "2nd Close Angle (0-180):", "%0.f", 0, 180, 1, secondaryCloseDefault);
+    SecondaryCloseAngleNP[0].fill("SECONDARY_CLOSE_ANGLE", "2nd Close Angle (0-270):", "%0.f", 0, 270, 1, secondaryCloseDefault);
     SecondaryCloseAngleNP.fill(getDeviceName(), "SECONDARY_CLOSE_ANGLE", "Cover", OPTIONS_TAB, IP_WO, 60, IPS_IDLE);
+
+    //Jog step size selector (radio buttons, default +1)
+    PrimaryJogStepSP[Jog_m45].fill("m45", "-45°", ISS_OFF);
+    PrimaryJogStepSP[Jog_m10].fill("m10", "-10°", ISS_OFF);
+    PrimaryJogStepSP[Jog_m1].fill("m1",  "-1°",  ISS_OFF);
+    PrimaryJogStepSP[Jog_p1].fill("p1",  "+1°",  ISS_ON);
+    PrimaryJogStepSP[Jog_p10].fill("p10", "+10°", ISS_OFF);
+    PrimaryJogStepSP[Jog_p45].fill("p45", "+45°", ISS_OFF);
+    PrimaryJogStepSP.fill(getDeviceName(), "JOG_STEP", "Jog Step", OPTIONS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    PrimaryJogOpenBtn[0].fill("JOG", "Jog Open ▶", ISS_OFF);
+    PrimaryJogOpenBtn.fill(getDeviceName(), "JOG_OPEN", "Cover", OPTIONS_TAB, IP_WO, ISR_ATMOST1, 60, IPS_IDLE);
+
+    PrimaryJogCloseBtn[0].fill("JOG", "Jog Close ▶", ISS_OFF);
+    PrimaryJogCloseBtn.fill(getDeviceName(), "JOG_CLOSE", "Cover", OPTIONS_TAB, IP_WO, ISR_ATMOST1, 60, IPS_IDLE);
+
+    PrimaryOpenSetPos[0].fill("SET", "Set as Open Pos", ISS_OFF);
+    PrimaryOpenSetPos.fill(getDeviceName(), "PRI_OPEN_SET", "Cover", OPTIONS_TAB, IP_WO, ISR_ATMOST1, 60, IPS_IDLE);
+    PrimaryCloseSetPos[0].fill("SET", "Set as Close Pos", ISS_OFF);
+    PrimaryCloseSetPos.fill(getDeviceName(), "PRI_CLOSE_SET", "Cover", OPTIONS_TAB, IP_WO, ISR_ATMOST1, 60, IPS_IDLE);
 
     //----- CALIBRATOR CONTROL -----
     //calibrator state
@@ -400,6 +420,66 @@ bool DarkLight_CoverCalibrator::initProperties()
             SecondaryCloseAngleNP.setState(IPS_IDLE);
             SecondaryCloseAngleNP.apply();
         }
+        saveConfig();
+    });
+
+    //Jog Open button — applies selected step to open angle + physically moves servo
+    PrimaryJogOpenBtn.onUpdate([this]
+    {
+        static const int steps[] = {-45, -10, -1, 1, 10, 45};
+        if (!isConnected()) { PrimaryJogOpenBtn.reset(); PrimaryJogOpenBtn.apply(); return; }
+        int idx = PrimaryJogStepSP.findOnSwitchIndex();
+        int angle = std::clamp(static_cast<int>(PrimaryOpenAngleNP[0].getValue()) + steps[idx], 0, 270);
+        PrimaryOpenAngleNP[0].setValue(angle);
+        PrimaryOpenAngleNP.setState(IPS_OK); PrimaryOpenAngleNP.apply();
+        char cmd[8], resp[8] = {0};
+        snprintf(cmd, sizeof(cmd), "J%d", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Jog Open → %d°", angle);
+        snprintf(cmd, sizeof(cmd), "UO%d", angle);
+        sendCommand(cmd, resp);
+        saveConfig();
+        PrimaryJogOpenBtn.reset(); PrimaryJogOpenBtn.setState(IPS_IDLE); PrimaryJogOpenBtn.apply();
+    });
+
+    //Jog Close button
+    PrimaryJogCloseBtn.onUpdate([this]
+    {
+        static const int steps[] = {-45, -10, -1, 1, 10, 45};
+        if (!isConnected()) { PrimaryJogCloseBtn.reset(); PrimaryJogCloseBtn.apply(); return; }
+        int idx = PrimaryJogStepSP.findOnSwitchIndex();
+        int angle = std::clamp(static_cast<int>(PrimaryCloseAngleNP[0].getValue()) + steps[idx], 0, 270);
+        PrimaryCloseAngleNP[0].setValue(angle);
+        PrimaryCloseAngleNP.setState(IPS_OK); PrimaryCloseAngleNP.apply();
+        char cmd[8], resp[8] = {0};
+        snprintf(cmd, sizeof(cmd), "J%d", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Jog Close → %d°", angle);
+        snprintf(cmd, sizeof(cmd), "UC%d", angle);
+        sendCommand(cmd, resp);
+        saveConfig();
+        PrimaryJogCloseBtn.reset(); PrimaryJogCloseBtn.setState(IPS_IDLE); PrimaryJogCloseBtn.apply();
+    });
+
+    //Set current as Open Pos
+    PrimaryOpenSetPos.onUpdate([this]
+    {
+        if (!isConnected()) return;
+        int angle = static_cast<int>(PrimaryOpenAngleNP[0].getValue());
+        char cmd[8], resp[8] = {0};
+        snprintf(cmd, sizeof(cmd), "UO%d", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Open angle saved → %d\u00b0", angle);
+        PrimaryOpenSetPos.reset(); PrimaryOpenSetPos.setState(IPS_IDLE); PrimaryOpenSetPos.apply();
+        saveConfig();
+    });
+
+    //Set current as Close Pos
+    PrimaryCloseSetPos.onUpdate([this]
+    {
+        if (!isConnected()) return;
+        int angle = static_cast<int>(PrimaryCloseAngleNP[0].getValue());
+        char cmd[8], resp[8] = {0};
+        snprintf(cmd, sizeof(cmd), "UC%d", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Close angle saved → %d\u00b0", angle);
+        PrimaryCloseSetPos.reset(); PrimaryCloseSetPos.setState(IPS_IDLE); PrimaryCloseSetPos.apply();
         saveConfig();
     });
 
@@ -948,7 +1028,12 @@ bool DarkLight_CoverCalibrator::updateProperties()
                 PrimaryCloseAngleNP[0].setValue(std::stod(AngleResponse));
             }
             defineProperty(PrimaryOpenAngleNP);
+            defineProperty(PrimaryJogStepSP);
+            defineProperty(PrimaryJogOpenBtn);
+            defineProperty(PrimaryJogCloseBtn);
+            defineProperty(PrimaryOpenSetPos);
             defineProperty(PrimaryCloseAngleNP);
+            defineProperty(PrimaryCloseSetPos);
 
             //secondary servo may not be installed — device returns '?' in that case
             snprintf(AngleCmd, sizeof(AngleCmd), "VO%d", static_cast<int>(SecondaryOpenAngleNP[0].getValue()));
@@ -1051,6 +1136,15 @@ bool DarkLight_CoverCalibrator::updateProperties()
     {
         deleteProperty(CoverStateTP);
         deleteProperty(MoveToSP);
+        deleteProperty(PrimaryOpenAngleNP);
+        deleteProperty(PrimaryJogStepSP);
+        deleteProperty(PrimaryJogOpenBtn);
+        deleteProperty(PrimaryJogCloseBtn);
+        deleteProperty(PrimaryOpenSetPos);
+        deleteProperty(PrimaryCloseAngleNP);
+        deleteProperty(PrimaryCloseSetPos);
+        deleteProperty(SecondaryOpenAngleNP);
+        deleteProperty(SecondaryCloseAngleNP);
         deleteProperty(CalibratorStateTP);
         deleteProperty(TurnLightSP);
         deleteProperty(MaxBrightnessNP);
