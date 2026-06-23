@@ -18,13 +18,17 @@ namespace DarkLight.CoverCalibrator
     /// </summary>
     [Guid("D1E2F3A4-B5C6-4789-A0B1-C2D3E4F5A6B7")]
     [ProgId("DarkLight.CoverCalibrator")]
+    [ComVisible(true)]
+    [ClassInterface(ClassInterfaceType.None)]
     [ServedClassName("DarkLight Cover Calibrator")]
     public class Driver : ICoverCalibratorV2, IDisposable
     {
         // ── Driver identity ────────────────────────────────────────
+        private const string DriverId = "DarkLight.CoverCalibrator";
         private const string DriverName = "DarkLight Cover Calibrator";
         private const string DriverDescription = "ASCOM driver for the DIY DarkLight Cover Calibrator";
-        private const string DriverVersion = "1.0.0";
+        private const string DriverVersionString = "1.0.1";
+        public const int MaxServoAngle = 270;
 
         // ── Internal state ─────────────────────────────────────────
         private DeviceSerial _device;
@@ -32,6 +36,7 @@ namespace DarkLight.CoverCalibrator
         private bool _connected;
         private CoverStatus _coverStatus = CoverStatus.Unknown;
         private CalibratorStatus _calibratorStatus = CalibratorStatus.Unknown;
+        private int _heaterState = 4;
         private int _brightness;
         private int _maxBrightness;
         private int _primaryOpenAngle = 0;
@@ -42,6 +47,7 @@ namespace DarkLight.CoverCalibrator
         private int _baudRate = 115200;
         private int _pollIntervalMs = 1000;
         private bool _disposed;
+        private bool _connecting;
 
         // ── ASCOM profile keys ─────────────────────────────────────
         private const string ProfilePortName = "PortName";
@@ -226,7 +232,7 @@ namespace DarkLight.CoverCalibrator
         {
             get
             {
-                var info = $"DarkLight Cover Calibrator Driver {DriverVersion}\n" +
+                var info = $"DarkLight Cover Calibrator Driver {DriverVersionString}\n" +
                           $"Connected: {_connected}\n" +
                           $"Port: {_portName} @ {_baudRate} baud\n" +
                           $"Primary Open Angle: {_primaryOpenAngle}°  Close Angle: {_primaryCloseAngle}°\n" +
@@ -235,11 +241,38 @@ namespace DarkLight.CoverCalibrator
             }
         }
 
-        public string DriverVersion => DriverVersion;
+        public string DriverVersion => DriverVersionString;
 
         public short InterfaceVersion => 2;
 
         public string Name => DriverName;
+
+        public bool Connecting => _connecting;
+
+        public bool CalibratorChanging => _calibratorStatus == CalibratorStatus.NotReady;
+
+        public bool CoverMoving => _coverStatus == CoverStatus.Moving;
+
+        public IStateValueCollection DeviceState
+        {
+            get
+            {
+                var state = new StateValueCollection();
+                state.Add("Connected", _connected);
+                state.Add("Connecting", _connecting);
+                state.Add("CoverState", _coverStatus);
+                state.Add("CoverMoving", CoverMoving);
+                state.Add("CalibratorState", _calibratorStatus);
+                state.Add("CalibratorChanging", CalibratorChanging);
+                state.Add("HeaterState", HeaterStateText);
+                state.Add("Brightness", _brightness);
+                state.Add("MaxBrightness", _maxBrightness);
+                state.Add("PortName", _portName);
+                state.Add("BaudRate", _baudRate);
+                state.AddUtcDateTime();
+                return state;
+            }
+        }
 
         #endregion
 
@@ -310,8 +343,11 @@ namespace DarkLight.CoverCalibrator
         // Connection Management
         // ────────────────────────────────────────────────────────────
 
-        private void Connect()
+        public void Connect()
         {
+            _connecting = true;
+            try
+            {
             LogMessage("Connect", $"Opening {_portName} @ {_baudRate}");
             _device.Open(_portName, _baudRate);
 
@@ -337,9 +373,14 @@ namespace DarkLight.CoverCalibrator
 
             _connected = true;
             LogMessage("Connect", "Driver connected successfully");
+            }
+            finally
+            {
+                _connecting = false;
+            }
         }
 
-        private void Disconnect()
+        public void Disconnect()
         {
             LogMessage("Disconnect", "called");
 
@@ -352,6 +393,7 @@ namespace DarkLight.CoverCalibrator
 
             _coverStatus = CoverStatus.Unknown;
             _calibratorStatus = CalibratorStatus.Unknown;
+            _heaterState = 4;
         }
 
         // ────────────────────────────────────────────────────────────
@@ -407,6 +449,12 @@ namespace DarkLight.CoverCalibrator
                 {
                     _maxBrightness = maxVal;
                 }
+
+                var r = _device.SendCommand("R");
+                if (r != null && int.TryParse(r, out int heatVal))
+                {
+                    _heaterState = heatVal;
+                }
             }
             catch (Exception ex)
             {
@@ -447,7 +495,7 @@ namespace DarkLight.CoverCalibrator
 
         public void SetPrimaryOpenAngle(int angle)
         {
-            angle = Clamp(angle, 0, 180);
+            angle = Clamp(angle, 0, MaxServoAngle);
             _primaryOpenAngle = angle;
             if (_connected)
                 _device.SendCommand($"UO{angle}");
@@ -456,7 +504,7 @@ namespace DarkLight.CoverCalibrator
 
         public void SetPrimaryCloseAngle(int angle)
         {
-            angle = Clamp(angle, 0, 180);
+            angle = Clamp(angle, 0, MaxServoAngle);
             _primaryCloseAngle = angle;
             if (_connected)
                 _device.SendCommand($"UC{angle}");
@@ -465,7 +513,7 @@ namespace DarkLight.CoverCalibrator
 
         public void SetSecondaryOpenAngle(int angle)
         {
-            angle = Clamp(angle, 0, 180);
+            angle = Clamp(angle, 0, MaxServoAngle);
             _secondaryOpenAngle = angle;
             if (_connected)
                 _device.SendCommand($"VO{angle}");
@@ -474,7 +522,7 @@ namespace DarkLight.CoverCalibrator
 
         public void SetSecondaryCloseAngle(int angle)
         {
-            angle = Clamp(angle, 0, 180);
+            angle = Clamp(angle, 0, MaxServoAngle);
             _secondaryCloseAngle = angle;
             if (_connected)
                 _device.SendCommand($"VC{angle}");
@@ -486,10 +534,36 @@ namespace DarkLight.CoverCalibrator
         public int SecondaryOpenAngle => _secondaryOpenAngle;
         public int SecondaryCloseAngle => _secondaryCloseAngle;
 
-        /// <summary>Jog primary servo directly to a raw angle (0-180). Requires connected.</summary>
+        public int HeaterState => _heaterState;
+
+        public string HeaterStateText => FormatHeaterState(_heaterState);
+
+        public void RefreshDeviceState()
+        {
+            RefreshState();
+        }
+
+        public string SendSetupCommand(string command)
+        {
+            CheckConnected("SendSetupCommand");
+            var resp = _device.SendCommand(command);
+            LogMessage("SendSetupCommand", $"cmd={command} resp={resp}");
+            RefreshState();
+            return resp ?? "?";
+        }
+
+        public string QuerySensorDetails()
+        {
+            CheckConnected("QuerySensorDetails");
+            var resp = _device.SendCommand("Y");
+            LogMessage("QuerySensorDetails", $"resp={resp}");
+            return resp ?? "?";
+        }
+
+        /// <summary>Jog primary servo directly to a raw angle (0-270). Requires connected.</summary>
         public int JogPrimary(int angle)
         {
-            angle = Clamp(angle, 0, 180);
+            angle = Clamp(angle, 0, MaxServoAngle);
             if (_connected)
             {
                 var resp = _device.SendCommand($"J{angle}");
@@ -508,10 +582,10 @@ namespace DarkLight.CoverCalibrator
             return _primaryCloseAngle;
         }
 
-        /// <summary>Jog secondary servo directly to a raw angle (0-180). Requires connected.</summary>
+        /// <summary>Jog secondary servo directly to a raw angle (0-270). Requires connected.</summary>
         public int JogSecondary(int angle)
         {
-            angle = Clamp(angle, 0, 180);
+            angle = Clamp(angle, 0, MaxServoAngle);
             if (_connected)
             {
                 var resp = _device.SendCommand($"K{angle}");
@@ -575,13 +649,13 @@ namespace DarkLight.CoverCalibrator
             using (var profile = new Profile())
             {
                 profile.DeviceType = "CoverCalibrator";
-                _portName = profile.GetValue(DriverName, ProfilePortName, string.Empty, "COM3");
-                _baudRate = Convert.ToInt32(profile.GetValue(DriverName, ProfileBaudRate, string.Empty, "115200"), CultureInfo.InvariantCulture);
-                _pollIntervalMs = Convert.ToInt32(profile.GetValue(DriverName, ProfilePollInterval, string.Empty, "1000"), CultureInfo.InvariantCulture);
-                _primaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverName, ProfilePrimaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
-                _primaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverName, ProfilePrimaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
-                _secondaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverName, ProfileSecondaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
-                _secondaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverName, ProfileSecondaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
+                _portName = profile.GetValue(DriverId, ProfilePortName, string.Empty, "COM3");
+                _baudRate = Convert.ToInt32(profile.GetValue(DriverId, ProfileBaudRate, string.Empty, "115200"), CultureInfo.InvariantCulture);
+                _pollIntervalMs = Convert.ToInt32(profile.GetValue(DriverId, ProfilePollInterval, string.Empty, "1000"), CultureInfo.InvariantCulture);
+                _primaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfilePrimaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
+                _primaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfilePrimaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
+                _secondaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfileSecondaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
+                _secondaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfileSecondaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
             }
             LogMessage("ReadProfile", $"Port={_portName} Baud={_baudRate} PO={_primaryOpenAngle} PC={_primaryCloseAngle}");
         }
@@ -591,13 +665,13 @@ namespace DarkLight.CoverCalibrator
             using (var profile = new Profile())
             {
                 profile.DeviceType = "CoverCalibrator";
-                profile.WriteValue(DriverName, ProfilePortName, _portName);
-                profile.WriteValue(DriverName, ProfileBaudRate, _baudRate.ToString(CultureInfo.InvariantCulture));
-                profile.WriteValue(DriverName, ProfilePollInterval, _pollIntervalMs.ToString(CultureInfo.InvariantCulture));
-                profile.WriteValue(DriverName, ProfilePrimaryOpenAngle, _primaryOpenAngle.ToString(CultureInfo.InvariantCulture));
-                profile.WriteValue(DriverName, ProfilePrimaryCloseAngle, _primaryCloseAngle.ToString(CultureInfo.InvariantCulture));
-                profile.WriteValue(DriverName, ProfileSecondaryOpenAngle, _secondaryOpenAngle.ToString(CultureInfo.InvariantCulture));
-                profile.WriteValue(DriverName, ProfileSecondaryCloseAngle, _secondaryCloseAngle.ToString(CultureInfo.InvariantCulture));
+                profile.WriteValue(DriverId, ProfilePortName, _portName);
+                profile.WriteValue(DriverId, ProfileBaudRate, _baudRate.ToString(CultureInfo.InvariantCulture));
+                profile.WriteValue(DriverId, ProfilePollInterval, _pollIntervalMs.ToString(CultureInfo.InvariantCulture));
+                profile.WriteValue(DriverId, ProfilePrimaryOpenAngle, _primaryOpenAngle.ToString(CultureInfo.InvariantCulture));
+                profile.WriteValue(DriverId, ProfilePrimaryCloseAngle, _primaryCloseAngle.ToString(CultureInfo.InvariantCulture));
+                profile.WriteValue(DriverId, ProfileSecondaryOpenAngle, _secondaryOpenAngle.ToString(CultureInfo.InvariantCulture));
+                profile.WriteValue(DriverId, ProfileSecondaryCloseAngle, _secondaryCloseAngle.ToString(CultureInfo.InvariantCulture));
             }
             LogMessage("WriteProfile", "Profile saved");
         }
@@ -667,6 +741,27 @@ namespace DarkLight.CoverCalibrator
             return value;
         }
 
+        private static string FormatHeaterState(int state)
+        {
+            switch (state)
+            {
+                case 0:
+                    return "NotPresent";
+                case 1:
+                    return "Off";
+                case 2:
+                    return "Auto";
+                case 3:
+                    return "On";
+                case 5:
+                    return "Error";
+                case 6:
+                    return "HeatOnClose";
+                default:
+                    return "Unknown";
+            }
+        }
+
         // ────────────────────────────────────────────────────────────
         // COM Registration
         // ────────────────────────────────────────────────────────────
@@ -676,17 +771,28 @@ namespace DarkLight.CoverCalibrator
         [ComRegisterFunction]
         public static void RegisterClass(string key)
         {
-            // Remove the HKEY_CLASSES_ROOT\CLSID\{guid}\InprocServer32 sub-key
-            using (var clsidKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(key, true))
+            using (var profile = new Profile())
             {
-                clsidKey?.DeleteSubKey("InprocServer32", false);
+                profile.DeviceType = "CoverCalibrator";
+                if (profile.IsRegistered("ASCOM.DarkLight.CoverCalibrator"))
+                {
+                    profile.Unregister("ASCOM.DarkLight.CoverCalibrator");
+                }
+                profile.Register(DriverId, DriverName);
             }
         }
 
         [ComUnregisterFunction]
         public static void UnregisterClass(string key)
         {
-            // Default unregistration is sufficient
+            using (var profile = new Profile())
+            {
+                profile.DeviceType = "CoverCalibrator";
+                if (profile.IsRegistered(DriverId))
+                {
+                    profile.Unregister(DriverId);
+                }
+            }
         }
 
         #endregion

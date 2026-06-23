@@ -52,10 +52,10 @@ sudo apt install libindi-dev cmake build-essential
 | Disable Light while OPEN | 开盖时禁用灯光 |
 | Auto Heat (always ON) | 常开自动除露 |
 | Heat ON at CLOSE | 关盖时开启加热 |
-| 🆕 **Open Angle (0–180)** | **主舵机开盖角度** |
-| 🆕 **Close Angle (0–180)** | **主舵机关盖角度** |
-| 🆕 **2nd Open Angle (0–180)** | **副舵机开盖角度** |
-| 🆕 **2nd Close Angle (0–180)** | **副舵机关盖角度** |
+| 🆕 **Open Angle (0–270)** | **主舵机开盖角度** |
+| 🆕 **Close Angle (0–270)** | **主舵机关盖角度** |
+| 🆕 **2nd Open Angle (0–270)** | **副舵机开盖角度** |
+| 🆕 **2nd Close Angle (0–270)** | **副舵机关盖角度** |
 
 ## KStars / Ekos 集成
 

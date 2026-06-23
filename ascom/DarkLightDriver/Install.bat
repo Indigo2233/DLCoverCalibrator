@@ -22,13 +22,23 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Locate .NET Framework directory
-set "FRAMEWORK=%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319"
-if not exist "%FRAMEWORK%\RegAsm.exe" (
-    set "FRAMEWORK=%SystemRoot%\Microsoft.NET\Framework\v4.0.30319"
+REM Locate the compiled driver DLL
+set "DRIVER_DLL=%~dp0DarkLight.CoverCalibrator.dll"
+if not exist "%DRIVER_DLL%" (
+    set "DRIVER_DLL=%~dp0bin\Release\net48\DarkLight.CoverCalibrator.dll"
 )
 
-if not exist "%FRAMEWORK%\RegAsm.exe" (
+if not exist "%DRIVER_DLL%" (
+    echo [ERROR] DarkLight.CoverCalibrator.dll not found.
+    echo Build the driver first: dotnet build -c Release
+    pause
+    exit /b 1
+)
+
+set "REGASM32=%SystemRoot%\Microsoft.NET\Framework\v4.0.30319\RegAsm.exe"
+set "REGASM64=%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe"
+
+if not exist "%REGASM32%" (
     echo [ERROR] .NET Framework 4.8 RegAsm.exe not found.
     echo Please install .NET Framework 4.8.
     pause
@@ -36,16 +46,28 @@ if not exist "%FRAMEWORK%\RegAsm.exe" (
 )
 
 REM Register the driver DLL
-echo [1/2] Registering driver with COM...
-"%FRAMEWORK%\RegAsm.exe" "%~dp0DarkLight.CoverCalibrator.dll" /codebase /tlb
+echo [1/3] Registering 32-bit COM driver...
+"%REGASM32%" "%DRIVER_DLL%" /codebase
 
 if %errorlevel% neq 0 (
-    echo [ERROR] Failed to register driver DLL.
+    echo [ERROR] Failed to register 32-bit driver DLL.
     pause
     exit /b 1
 )
 
-echo [2/2] Setup complete. The driver should now appear in the ASCOM Chooser.
+echo [2/3] Registering 64-bit COM driver...
+if exist "%REGASM64%" (
+    "%REGASM64%" "%DRIVER_DLL%" /codebase
+    if %errorlevel% neq 0 (
+        echo [ERROR] Failed to register 64-bit driver DLL.
+        pause
+        exit /b 1
+    )
+) else (
+    echo [WARNING] 64-bit RegAsm.exe not found; skipped 64-bit registration.
+)
+
+echo [3/3] Setup complete. The driver should now appear in the ASCOM Chooser.
 echo.
 echo You can access the setup dialog from the ASCOM Chooser Properties button
 echo to configure COM port, baud rate, and servo open/close angles.
