@@ -27,13 +27,15 @@ namespace DarkLight.CoverCalibrator
         private Label _lblSecondaryCloseVal;
         private Label _lblSecondaryOpenVal;
 
-        private static readonly Color BgColor = Color.FromArgb(50, 50, 55);
-        private static readonly Color PanelBg = Color.FromArgb(60, 60, 65);
-        private static readonly Color TextColor = Color.FromArgb(220, 220, 220);
-        private static readonly Color MutedTextColor = Color.FromArgb(150, 150, 150);
-        private static readonly Color AccentColor = Color.FromArgb(70, 130, 220);
-        private static readonly Color BtnBg = Color.FromArgb(80, 80, 85);
-        private static readonly Color BtnHover = Color.FromArgb(100, 100, 105);
+        private static readonly Color BgColor = Color.FromArgb(45, 45, 50);
+        private static readonly Color PanelBg = Color.FromArgb(55, 55, 60);
+        private static readonly Color TextColor = Color.FromArgb(230, 230, 230);
+        private static readonly Color MutedTextColor = Color.FromArgb(160, 160, 160);
+        private static readonly Color AccentColor = Color.FromArgb(60, 120, 215);
+        private static readonly Color BtnBg = Color.FromArgb(75, 75, 80);
+        private static readonly Color BtnHover = Color.FromArgb(95, 95, 100);
+        private static readonly Color OpenColor = Color.FromArgb(90, 185, 110);
+        private static readonly Color CloseColor = Color.FromArgb(210, 150, 50);
 
         public SetupDialogForm(Driver driver)
         {
@@ -48,95 +50,102 @@ namespace DarkLight.CoverCalibrator
 
         private void InitializeComponent()
         {
-            Text = "DLCover Calibrator - Configure";
-            Size = new Size(720, 700);
+            Text = "DarkLight Cover Calibrator — Setup";
+            Size = new Size(760, 740);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = BgColor;
             ForeColor = TextColor;
-            Font = new Font("Microsoft YaHei UI", 9F);
+            Font = new Font("Microsoft YaHei UI", 9.5F);
 
-            int y = 10;
+            int y = 12;
 
+            // ── Serial Connection Bar ──
             var pnlSerial = new Panel
             {
-                Location = new Point(10, y),
-                Size = new Size(680, 36),
-                BackColor = PanelBg
+                Location = new Point(12, y),
+                Size = new Size(720, 40),
+                BackColor = PanelBg,
+                Padding = new Padding(10, 6, 10, 6)
             };
             Controls.Add(pnlSerial);
 
-            pnlSerial.Controls.Add(CreateLabel("COM:", 10, 9, 40, 18, TextColor));
+            pnlSerial.Controls.Add(MakeLabel("COM:", 10, 8, 40, 22, TextColor));
             _cmbPort = new ComboBox
             {
-                Location = new Point(52, 6),
-                Width = 92,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = BtnBg,
-                ForeColor = TextColor
+                Location = new Point(52, 8), Width = 88,
+                DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat,
+                BackColor = BtnBg, ForeColor = TextColor,
+                Font = new Font("Microsoft YaHei UI", 9.5F)
             };
             pnlSerial.Controls.Add(_cmbPort);
 
-            var btnRefresh = CreateButton("\u21bb", 148, 5, 28, 26);
+            var btnRefresh = MakeButton("\u21bb", 144, 7, 30, 24);
             btnRefresh.Click += (s, e) => RefreshPorts();
             pnlSerial.Controls.Add(btnRefresh);
 
-            pnlSerial.Controls.Add(CreateLabel("Baud:", 190, 9, 45, 18, TextColor));
+            pnlSerial.Controls.Add(MakeLabel("Baud:", 184, 8, 40, 22, TextColor));
             _cmbBaud = new ComboBox
             {
-                Location = new Point(238, 6),
-                Width = 86,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = BtnBg,
-                ForeColor = TextColor
+                Location = new Point(226, 8), Width = 76,
+                DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat,
+                BackColor = BtnBg, ForeColor = TextColor,
+                Font = new Font("Microsoft YaHei UI", 9.5F)
             };
             _cmbBaud.Items.AddRange(new object[] { "9600", "19200", "38400", "57600", "115200", "230400" });
             pnlSerial.Controls.Add(_cmbBaud);
 
-            _btnConnect = CreateButton("\u8fde\u63a5", 340, 5, 72, 26);
+            _btnConnect = MakeButton("\u8fde\u63a5", 314, 6, 80, 26);
+            _btnConnect.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
             _btnConnect.Click += BtnConnect_Click;
             pnlSerial.Controls.Add(_btnConnect);
 
-            _lblConnected = CreateLabel("", 426, 9, 100, 18, MutedTextColor);
+            _lblConnected = MakeLabel("", 406, 8, 110, 22, MutedTextColor);
+            _lblConnected.Font = new Font("Microsoft YaHei UI", 9.5F);
             pnlSerial.Controls.Add(_lblConnected);
 
-            _lblFirmware = CreateLabel("", 535, 9, 130, 18, MutedTextColor);
+            _lblFirmware = MakeLabel("", 526, 8, 180, 22, MutedTextColor);
+            _lblFirmware.Font = new Font("Microsoft YaHei UI", 9F);
+            _lblFirmware.TextAlign = ContentAlignment.MiddleRight;
             pnlSerial.Controls.Add(_lblFirmware);
 
-            y += 44;
+            y += 52;
 
+            // ── Device Control ──
             var grpControl = new GroupBox
             {
-                Text = "  \u8bbe\u5907\u63a7\u5236",
-                Location = new Point(10, y),
-                Size = new Size(680, 158),
-                BackColor = PanelBg,
-                ForeColor = TextColor,
+                Text = "  设备控制",
+                Location = new Point(12, y),
+                Size = new Size(720, 170),
+                BackColor = PanelBg, ForeColor = TextColor,
                 Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold)
             };
             Controls.Add(grpControl);
             CreateDeviceControlPanel(grpControl);
-            y += 168;
+            y += 184;
 
-            var grpPrimary = CreateServoPanel("\u4e3b\u8235\u673a\u89d2\u5ea6", true, 10, y, 680, 150);
+            // ── Primary Servo ──
+            var grpPrimary = CreateServoPanel("主舵机角度", true, 12, y, 720, 150);
             Controls.Add(grpPrimary);
-            y += 160;
+            y += 164;
 
-            var grpSecondary = CreateServoPanel("\u526f\u8235\u673a\u89d2\u5ea6", false, 10, y, 680, 150);
+            // ── Secondary Servo ──
+            var grpSecondary = CreateServoPanel("副舵机角度", false, 12, y, 720, 150);
             Controls.Add(grpSecondary);
-            y += 162;
+            y += 166;
 
-            var btnReset = CreateButton("\u91cd\u7f6e\u89d2\u5ea6", 480, y, 92, 32);
+            // ── Bottom Buttons ──
+            var btnReset = MakeButton("重置默认角度", 12, y + 4, 120, 32);
+            btnReset.Font = new Font("Microsoft YaHei UI", 9F);
             btnReset.Click += BtnReset_Click;
             Controls.Add(btnReset);
 
-            var btnDone = CreateButton("Done", 584, y, 92, 32);
+            var btnDone = MakeButton("保存并关闭", 612, y + 4, 120, 32);
             btnDone.BackColor = AccentColor;
             btnDone.ForeColor = Color.White;
+            btnDone.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
             btnDone.DialogResult = DialogResult.OK;
             btnDone.Click += BtnDone_Click;
             Controls.Add(btnDone);
@@ -145,34 +154,32 @@ namespace DarkLight.CoverCalibrator
 
             foreach (Control c in GetAllControls(this))
             {
-                if (c is Button btn)
-                {
-                    AttachHover(btn);
-                }
+                if (c is Button btn) AttachHover(btn);
             }
         }
 
         private void CreateDeviceControlPanel(GroupBox parent)
         {
-            parent.Controls.Add(CreateLabel("\u76d6\u677f", 15, 28, 54, 20, TextColor));
-            _lblCoverState = CreateLabel("", 70, 28, 110, 20, MutedTextColor);
+            // ── Row 1: Cover Control ──
+            parent.Controls.Add(MakeLabel("盖板", 18, 28, 48, 24, TextColor));
+            _lblCoverState = MakeLabel("", 66, 28, 120, 24, MutedTextColor);
+            _lblCoverState.Font = new Font("Microsoft YaHei UI", 9.5F);
             parent.Controls.Add(_lblCoverState);
-            AddCommandButton(parent, "\u5f00\u76d6", 190, 24, 70, 28, "O");
-            AddCommandButton(parent, "\u5173\u76d6", 268, 24, 70, 28, "C");
-            AddCommandButton(parent, "\u505c\u6b62", 346, 24, 70, 28, "H");
+            AddCmdBtn(parent, "开盖", 195, 26, 64, 30, "O");
+            AddCmdBtn(parent, "关盖", 265, 26, 64, 30, "C");
+            AddCmdBtn(parent, "停止", 335, 26, 64, 30, "H");
 
-            parent.Controls.Add(CreateLabel("\u5e73\u573a\u706f", 15, 68, 64, 20, TextColor));
-            _lblCalibratorState = CreateLabel("", 80, 68, 110, 20, MutedTextColor);
+            // ── Row 2: Light Panel ──
+            parent.Controls.Add(MakeLabel("平场灯", 18, 68, 56, 24, TextColor));
+            _lblCalibratorState = MakeLabel("", 76, 68, 110, 24, MutedTextColor);
+            _lblCalibratorState.Font = new Font("Microsoft YaHei UI", 9.5F);
             parent.Controls.Add(_lblCalibratorState);
 
-            parent.Controls.Add(CreateLabel("\u4eae\u5ea6", 190, 68, 42, 20, TextColor));
+            parent.Controls.Add(MakeLabel("亮度", 195, 66, 36, 20, TextColor));
             _trkBrightness = new TrackBar
             {
-                Location = new Point(232, 61),
-                Size = new Size(210, 40),
-                Minimum = 0,
-                Maximum = 255,
-                TickFrequency = 25,
+                Location = new Point(232, 62), Size = new Size(180, 38),
+                Minimum = 0, Maximum = 255, TickFrequency = 51,
                 BackColor = PanelBg
             };
             _trkBrightness.Scroll += BrightnessControl_Changed;
@@ -180,36 +187,37 @@ namespace DarkLight.CoverCalibrator
 
             _numBrightness = new NumericUpDown
             {
-                Location = new Point(444, 66),
-                Size = new Size(62, 22),
-                Minimum = 0,
-                Maximum = 255,
-                BackColor = BtnBg,
-                ForeColor = TextColor
+                Location = new Point(418, 65), Size = new Size(58, 22),
+                Minimum = 0, Maximum = 255,
+                BackColor = BtnBg, ForeColor = TextColor,
+                Font = new Font("Microsoft YaHei UI", 9.5F)
             };
             _numBrightness.ValueChanged += BrightnessControl_Changed;
             parent.Controls.Add(_numBrightness);
 
-            _lblBrightness = CreateLabel("", 512, 68, 60, 20, MutedTextColor);
+            _lblBrightness = MakeLabel("", 480, 66, 56, 24, MutedTextColor);
             parent.Controls.Add(_lblBrightness);
-            AddLightButton(parent, "\u5f00\u706f", 580, 62, 42, 28, true);
-            AddLightButton(parent, "\u5173\u706f", 628, 62, 42, 28, false);
+            AddLightBtn(parent, "开灯", 542, 64, 48, 30, true);
+            AddLightBtn(parent, "关灯", 596, 64, 48, 30, false);
 
-            parent.Controls.Add(CreateLabel("\u52a0\u70ed", 15, 110, 54, 20, TextColor));
-            _lblHeaterState = CreateLabel("", 70, 110, 110, 20, MutedTextColor);
+            // ── Row 3: Heater ──
+            parent.Controls.Add(MakeLabel("加热", 18, 112, 48, 24, TextColor));
+            _lblHeaterState = MakeLabel("", 66, 112, 110, 24, MutedTextColor);
+            _lblHeaterState.Font = new Font("Microsoft YaHei UI", 9.5F);
             parent.Controls.Add(_lblHeaterState);
-            AddCommandButton(parent, "\u624b\u52a8\u5f00", 190, 104, 66, 28, "W");
-            AddCommandButton(parent, "\u5173\u95ed", 262, 104, 54, 28, "w");
-            AddCommandButton(parent, "\u81ea\u52a8\u5f00", 322, 104, 66, 28, "Q");
-            AddCommandButton(parent, "\u81ea\u52a8\u5173", 394, 104, 66, 28, "q");
-            AddCommandButton(parent, "\u5173\u76d6\u5f00", 466, 104, 66, 28, "E");
-            AddCommandButton(parent, "\u5173\u76d6\u5173", 538, 104, 66, 28, "e");
+            AddCmdBtn(parent, "手动开", 195, 110, 58, 28, "W");
+            AddCmdBtn(parent, "关闭",  259, 110, 48, 28, "w");
+            AddCmdBtn(parent, "自动开", 313, 110, 58, 28, "Q");
+            AddCmdBtn(parent, "自动关", 377, 110, 58, 28, "q");
+            AddCmdBtn(parent, "关盖开", 441, 110, 58, 28, "E");
+            AddCmdBtn(parent, "关盖关", 505, 110, 58, 28, "e");
 
-            var btnSensor = CreateButton("\u4f20\u611f\u5668", 610, 104, 54, 28);
+            var btnSensor = MakeButton("传感器", 570, 110, 60, 28);
             btnSensor.Click += BtnSensor_Click;
             parent.Controls.Add(btnSensor);
 
-            _lblSensor = CreateLabel("", 190, 132, 470, 18, MutedTextColor);
+            _lblSensor = MakeLabel("", 195, 140, 510, 20, MutedTextColor);
+            _lblSensor.Font = new Font("Microsoft YaHei UI", 8.5F);
             parent.Controls.Add(_lblSensor);
         }
 
@@ -220,26 +228,28 @@ namespace DarkLight.CoverCalibrator
                 Text = "  " + title,
                 Location = new Point(x, y),
                 Size = new Size(w, h),
-                BackColor = PanelBg,
-                ForeColor = TextColor,
+                BackColor = PanelBg, ForeColor = TextColor,
                 Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold)
             };
 
-            int rowY = 32;
-            CreateAngleRow(grp, isPrimary, true, rowY);
-            CreateAngleRow(grp, isPrimary, false, rowY + 62);
+            CreateAngleRow(grp, isPrimary, false, 28);  // Open row
+            CreateAngleRow(grp, isPrimary, true, 94);    // Close row
             return grp;
         }
 
         private void CreateAngleRow(GroupBox parent, bool isPrimary, bool isClose, int y)
         {
-            string labelText = isClose ? "\u5173\u95ed\u4f4d\u7f6e" : "\u6253\u5f00\u4f4d\u7f6e";
-            Color labelColor = isClose ? Color.FromArgb(200, 160, 80) : Color.FromArgb(120, 200, 120);
-            parent.Controls.Add(CreateLabel(labelText, 15, y, 78, 22, labelColor));
+            string labelText = isClose ? "关闭位置" : "打开位置";
+            Color accent = isClose ? CloseColor : OpenColor;
 
+            // Label
+            parent.Controls.Add(MakeLabel(labelText, 18, y + 4, 68, 22, accent));
+
+            // Angle value display
             int currentAngle = GetSavedAngle(isPrimary, isClose);
-            var valueLabel = CreateLabel($"{currentAngle}\u00b0", 105, y - 2, 70, 24, TextColor);
-            valueLabel.Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold);
+            var valueLabel = MakeLabel($"{currentAngle}°", 92, y, 60, 30, TextColor);
+            valueLabel.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold);
+            valueLabel.TextAlign = ContentAlignment.MiddleLeft;
             parent.Controls.Add(valueLabel);
 
             if (isPrimary && isClose) _lblPrimaryCloseVal = valueLabel;
@@ -247,17 +257,20 @@ namespace DarkLight.CoverCalibrator
             if (!isPrimary && isClose) _lblSecondaryCloseVal = valueLabel;
             if (!isPrimary && !isClose) _lblSecondaryOpenVal = valueLabel;
 
-            var btnSet = CreateButton(isClose ? "\u4fdd\u5b58\u4e3a\u5173\u95ed" : "\u4fdd\u5b58\u4e3a\u6253\u5f00", 190, y - 4, 118, 28);
+            // Save as Open/Close button
+            var btnSet = MakeButton(isClose ? "保存为关闭" : "保存为打开", 165, y, 110, 30);
+            btnSet.Font = new Font("Microsoft YaHei UI", 9F);
             btnSet.Click += (s, e) =>
             {
                 if (!EnsureConnected()) return;
                 int pos = isPrimary ? _driver.GetPrimaryPosition() : _driver.GetSecondaryPosition();
                 SaveAngle(isPrimary, isClose, pos);
-                valueLabel.Text = $"{pos}\u00b0";
+                valueLabel.Text = $"{pos}°";
             };
             parent.Controls.Add(btnSet);
 
-            AddJogButtons(parent, 330, y - 3, isPrimary, isClose, valueLabel);
+            // Jog buttons
+            AddJogButtons(parent, 295, y + 1, isPrimary, isClose, valueLabel);
         }
 
         private void AddJogButtons(Control parent, int x, int y, bool isPrimary, bool isClose, Label valLabel)
@@ -267,9 +280,9 @@ namespace DarkLight.CoverCalibrator
 
             foreach (var step in steps)
             {
-                string text = step > 0 ? $"+{step}\u00b0" : $"{step}\u00b0";
-                int width = Math.Abs(step) == 1 ? 42 : 46;
-                var btn = CreateButton(text, cx, y, width, 28);
+                string text = step > 0 ? $"+{step}" : $"{step}";
+                int width = Math.Abs(step) >= 10 ? 48 : 42;
+                var btn = MakeButton(text, cx, y, width, 28);
                 btn.Tag = step;
                 btn.Click += (s, e) =>
                 {
@@ -280,19 +293,15 @@ namespace DarkLight.CoverCalibrator
                     int newAngle = Clamp(current + delta, 0, Driver.MaxServoAngle);
 
                     if (isPrimary)
-                    {
                         _driver.JogPrimary(newAngle);
-                    }
                     else
-                    {
                         _driver.JogSecondary(newAngle);
-                    }
 
                     SaveAngle(isPrimary, isClose, newAngle);
-                    valLabel.Text = $"{newAngle}\u00b0";
+                    valLabel.Text = $"{newAngle}°";
                 };
                 parent.Controls.Add(btn);
-                cx += width + 6;
+                cx += width + 10;
             }
         }
 
@@ -431,16 +440,16 @@ namespace DarkLight.CoverCalibrator
             _syncingBrightness = false;
         }
 
-        private void AddCommandButton(Control parent, string text, int x, int y, int w, int h, string command)
+        private void AddCmdBtn(Control parent, string text, int x, int y, int w, int h, string command)
         {
-            var button = CreateButton(text, x, y, w, h);
+            var button = MakeButton(text, x, y, w, h);
             button.Click += (s, e) => SendCommand(command);
             parent.Controls.Add(button);
         }
 
-        private void AddLightButton(Control parent, string text, int x, int y, int w, int h, bool turnOn)
+        private void AddLightBtn(Control parent, string text, int x, int y, int w, int h, bool turnOn)
         {
-            var button = CreateButton(text, x, y, w, h);
+            var button = MakeButton(text, x, y, w, h);
             button.Click += (s, e) =>
             {
                 if (!EnsureConnected()) return;
@@ -533,7 +542,7 @@ namespace DarkLight.CoverCalibrator
             if (!isPrimary && !isClose) _driver.SetSecondaryOpenAngle(angle);
         }
 
-        private Button CreateButton(string text, int x, int y, int w, int h)
+        private Button MakeButton(string text, int x, int y, int w, int h)
         {
             return new Button
             {
@@ -543,11 +552,13 @@ namespace DarkLight.CoverCalibrator
                 FlatStyle = FlatStyle.Flat,
                 BackColor = BtnBg,
                 ForeColor = TextColor,
-                Font = new Font("Microsoft YaHei UI", 8.5F)
+                Font = new Font("Microsoft YaHei UI", 9F),
+                Margin = new Padding(0),
+                Padding = new Padding(2)
             };
         }
 
-        private Label CreateLabel(string text, int x, int y, int w, int h, Color color)
+        private Label MakeLabel(string text, int x, int y, int w, int h, Color color)
         {
             return new Label
             {
@@ -556,7 +567,10 @@ namespace DarkLight.CoverCalibrator
                 Size = new Size(w, h),
                 ForeColor = color,
                 AutoEllipsis = true,
-                Font = new Font("Microsoft YaHei UI", 9F)
+                Font = new Font("Microsoft YaHei UI", 9.5F),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
             };
         }
 

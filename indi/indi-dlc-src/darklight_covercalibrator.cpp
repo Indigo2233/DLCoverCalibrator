@@ -260,7 +260,7 @@ bool DarkLight_CoverCalibrator::initProperties()
         if (isConnected())
         {
             std::string coverStateText = CoverStateTP[0].getText();
-            char MoveToResponse[8] = {0};
+            char MoveToResponse[32] = {0};
             switch (MoveToSP.findOnSwitchIndex())
             {
                 case Open:
@@ -340,7 +340,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     {
         if (isConnected())
         {
-            char AngleResponse[8] = {0};
+            char AngleResponse[32] = {0};
             char cmd[8];
             snprintf(cmd, sizeof(cmd), "UO%d", static_cast<int>(PrimaryOpenAngleNP[0].getValue()));
             if (sendCommand(cmd, AngleResponse))
@@ -362,7 +362,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     {
         if (isConnected())
         {
-            char AngleResponse[8] = {0};
+            char AngleResponse[32] = {0};
             char cmd[8];
             snprintf(cmd, sizeof(cmd), "UC%d", static_cast<int>(PrimaryCloseAngleNP[0].getValue()));
             if (sendCommand(cmd, AngleResponse))
@@ -384,7 +384,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     {
         if (isConnected())
         {
-            char AngleResponse[8] = {0};
+            char AngleResponse[32] = {0};
             char cmd[8];
             snprintf(cmd, sizeof(cmd), "VO%d", static_cast<int>(SecondaryOpenAngleNP[0].getValue()));
             if (sendCommand(cmd, AngleResponse))
@@ -406,7 +406,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     {
         if (isConnected())
         {
-            char AngleResponse[8] = {0};
+            char AngleResponse[32] = {0};
             char cmd[8];
             snprintf(cmd, sizeof(cmd), "VC%d", static_cast<int>(SecondaryCloseAngleNP[0].getValue()));
             if (sendCommand(cmd, AngleResponse))
@@ -423,62 +423,90 @@ bool DarkLight_CoverCalibrator::initProperties()
         saveConfig();
     });
 
-    //Jog Open button — applies selected step to open angle + physically moves servo
+    //Jog Open button — applies selected step relative to CURRENT position, then saves as new open angle
     PrimaryJogOpenBtn.onUpdate([this]
     {
         static const int steps[] = {-45, -10, -1, 1, 10, 45};
         if (!isConnected()) { PrimaryJogOpenBtn.reset(); PrimaryJogOpenBtn.apply(); return; }
         int idx = PrimaryJogStepSP.findOnSwitchIndex();
-        int angle = std::clamp(static_cast<int>(PrimaryOpenAngleNP[0].getValue()) + steps[idx], 0, 270);
+
+        // Query current servo position
+        char posResp[32] = {0};
+        int currentPos = static_cast<int>(PrimaryOpenAngleNP[0].getValue()); // fallback
+        if (sendCommand("j", posResp)) {
+            currentPos = atoi(posResp);
+        }
+        int angle = std::clamp(currentPos + steps[idx], 0, 270);
+
         PrimaryOpenAngleNP[0].setValue(angle);
         PrimaryOpenAngleNP.setState(IPS_OK); PrimaryOpenAngleNP.apply();
-        char cmd[8], resp[8] = {0};
+        char cmd[8], resp[32] = {0};
         snprintf(cmd, sizeof(cmd), "J%d", angle);
-        if (sendCommand(cmd, resp)) LOGF_INFO("Jog Open → %d°", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Jog Open: %d° → %d°", currentPos, angle);
         snprintf(cmd, sizeof(cmd), "UO%d", angle);
         sendCommand(cmd, resp);
         saveConfig();
         PrimaryJogOpenBtn.reset(); PrimaryJogOpenBtn.setState(IPS_IDLE); PrimaryJogOpenBtn.apply();
     });
 
-    //Jog Close button
+    //Jog Close button — applies selected step relative to CURRENT position, then saves as new close angle
     PrimaryJogCloseBtn.onUpdate([this]
     {
         static const int steps[] = {-45, -10, -1, 1, 10, 45};
         if (!isConnected()) { PrimaryJogCloseBtn.reset(); PrimaryJogCloseBtn.apply(); return; }
         int idx = PrimaryJogStepSP.findOnSwitchIndex();
-        int angle = std::clamp(static_cast<int>(PrimaryCloseAngleNP[0].getValue()) + steps[idx], 0, 270);
+
+        // Query current servo position
+        char posResp[32] = {0};
+        int currentPos = static_cast<int>(PrimaryCloseAngleNP[0].getValue()); // fallback
+        if (sendCommand("j", posResp)) {
+            currentPos = atoi(posResp);
+        }
+        int angle = std::clamp(currentPos + steps[idx], 0, 270);
+
         PrimaryCloseAngleNP[0].setValue(angle);
         PrimaryCloseAngleNP.setState(IPS_OK); PrimaryCloseAngleNP.apply();
-        char cmd[8], resp[8] = {0};
+        char cmd[8], resp[32] = {0};
         snprintf(cmd, sizeof(cmd), "J%d", angle);
-        if (sendCommand(cmd, resp)) LOGF_INFO("Jog Close → %d°", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Jog Close: %d° → %d°", currentPos, angle);
         snprintf(cmd, sizeof(cmd), "UC%d", angle);
         sendCommand(cmd, resp);
         saveConfig();
         PrimaryJogCloseBtn.reset(); PrimaryJogCloseBtn.setState(IPS_IDLE); PrimaryJogCloseBtn.apply();
     });
 
-    //Set current as Open Pos
+    //Set current as Open Pos — reads current physical position and saves it
     PrimaryOpenSetPos.onUpdate([this]
     {
         if (!isConnected()) return;
-        int angle = static_cast<int>(PrimaryOpenAngleNP[0].getValue());
-        char cmd[8], resp[8] = {0};
+        char posResp[32] = {0};
+        int angle = static_cast<int>(PrimaryOpenAngleNP[0].getValue()); // fallback
+        if (sendCommand("j", posResp)) {
+            angle = atoi(posResp);
+        }
+        PrimaryOpenAngleNP[0].setValue(angle);
+        PrimaryOpenAngleNP.setState(IPS_OK); PrimaryOpenAngleNP.apply();
+        char cmd[8], resp[32] = {0};
         snprintf(cmd, sizeof(cmd), "UO%d", angle);
-        if (sendCommand(cmd, resp)) LOGF_INFO("Open angle saved → %d\u00b0", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Open angle saved ← %d\u00b0", angle);
         PrimaryOpenSetPos.reset(); PrimaryOpenSetPos.setState(IPS_IDLE); PrimaryOpenSetPos.apply();
         saveConfig();
     });
 
-    //Set current as Close Pos
+    //Set current as Close Pos — reads current physical position and saves it
     PrimaryCloseSetPos.onUpdate([this]
     {
         if (!isConnected()) return;
-        int angle = static_cast<int>(PrimaryCloseAngleNP[0].getValue());
-        char cmd[8], resp[8] = {0};
+        char posResp[32] = {0};
+        int angle = static_cast<int>(PrimaryCloseAngleNP[0].getValue()); // fallback
+        if (sendCommand("j", posResp)) {
+            angle = atoi(posResp);
+        }
+        PrimaryCloseAngleNP[0].setValue(angle);
+        PrimaryCloseAngleNP.setState(IPS_OK); PrimaryCloseAngleNP.apply();
+        char cmd[8], resp[32] = {0};
         snprintf(cmd, sizeof(cmd), "UC%d", angle);
-        if (sendCommand(cmd, resp)) LOGF_INFO("Close angle saved → %d\u00b0", angle);
+        if (sendCommand(cmd, resp)) LOGF_INFO("Close angle saved ← %d\u00b0", angle);
         PrimaryCloseSetPos.reset(); PrimaryCloseSetPos.setState(IPS_IDLE); PrimaryCloseSetPos.apply();
         saveConfig();
     });
@@ -488,7 +516,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     {
         if (isConnected())
         {
-            char TurnLightResponse[8] = {0};
+            char TurnLightResponse[32] = {0};
             std::string calibratorStateText = CalibratorStateTP[0].getText();
             std::string coverStateText = CoverStateTP[0].getText();
             switch (TurnLightSP.findOnSwitchIndex())
@@ -653,7 +681,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     //Go to preset BB / NB values
     GoToSavedSP.onUpdate([this]
     {
-        char GoToSavedResponse[8] = {0};
+        char GoToSavedResponse[32] = {0};
         if (TurnLightSP.findOnSwitchIndex() == Light_On)
         {
             switch (GoToSavedSP.findOnSwitchIndex())
@@ -705,7 +733,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     //Save preset BB / NB values
     SetToSavedSP.onUpdate([this]
     {
-        char SetToSavedResponse[8] = {0};
+        char SetToSavedResponse[32] = {0};
         if (TurnLightSP.findOnSwitchIndex() == Light_On)
         {
             switch (SetToSavedSP.findOnSwitchIndex())
@@ -808,7 +836,7 @@ bool DarkLight_CoverCalibrator::initProperties()
     {
         if (isConnected())
         {
-            char HeaterResponse[8] = {0};
+            char HeaterResponse[32] = {0};
             std::string heaterStateText = HeaterStateTP[0].getText();
             switch (TurnHeaterSP.findOnSwitchIndex())
             {
@@ -978,7 +1006,7 @@ bool DarkLight_CoverCalibrator::Handshake()
 
     // Send handshake command 'Z' and expect '?' in response
     const char *handshakeCommand = "Z";
-    char response[8] = {0}; // Assuming 8 bytes is sufficient for the response
+    char response[32] = {0}; // response buffer for handshake
 
     LOG_DEBUG("Sending handshake command");
 
@@ -1011,7 +1039,7 @@ bool DarkLight_CoverCalibrator::updateProperties()
             defineProperty(MoveToSP);
 
             //get and sync servo angles between INDI config and device
-            char AngleResponse[8] = {0};
+            char AngleResponse[32] = {0};
             char AngleCmd[8];
             //sync primary open angle: push saved INDI value to device, then read back
             snprintf(AngleCmd, sizeof(AngleCmd), "UO%d", static_cast<int>(PrimaryOpenAngleNP[0].getValue()));
@@ -1074,7 +1102,7 @@ bool DarkLight_CoverCalibrator::updateProperties()
 
             //get MaxBrightness
             LOG_DEBUG("Getting Max Brightness");
-            char MaxBrightnessResponse[8] = {0};
+            char MaxBrightnessResponse[32] = {0};
             if (!sendCommand("M", MaxBrightnessResponse))
             {
             }
@@ -1175,7 +1203,7 @@ bool DarkLight_CoverCalibrator::sendCommand(const char *command, const char *res
     }
 
     int nbytes_read = 0, nbytes_written = 0, tty_rc = 0;
-    char res[8] = {0};
+    char res[64] = {0};
 
     //retry a maximum of 3 times
     const int maxRetries = 3;
@@ -1312,7 +1340,7 @@ void DarkLight_CoverCalibrator::setStabilizeTime()
     command += std::to_string(intValue);  //append integer value
 
     //send command
-    char StabilizeTimeResponse[8] = {0};
+    char StabilizeTimeResponse[32] = {0};
     if (sendCommand(command.c_str(), StabilizeTimeResponse))
     {
         LOGF_DEBUG("StabilizeTime response: %s", StabilizeTimeResponse);
@@ -1326,7 +1354,7 @@ void DarkLight_CoverCalibrator::setStabilizeTime()
 void DarkLight_CoverCalibrator::setAutoOn()
 {
     LOG_DEBUG("Setting autoOn");
-    char AutoOnResponse[8] = {0};
+    char AutoOnResponse[32] = {0};
     switch (AutoOnSP.findOnSwitchIndex())
     {
         case Light_AutoOn:
@@ -1380,7 +1408,7 @@ void DarkLight_CoverCalibrator::setLightDisabled()
 
 void DarkLight_CoverCalibrator::getCoverState()
 {
-    char CoverStateResponse[8] = {0};
+    char CoverStateResponse[32] = {0};
     LOG_DEBUG("Get CoverState");
     if (!sendCommand("P", CoverStateResponse))
     {
@@ -1444,7 +1472,7 @@ void DarkLight_CoverCalibrator::getCoverState()
 
 void DarkLight_CoverCalibrator::getCalibratorState()
 {
-    char GetCalibratorStateResponse[8] = {0};
+    char GetCalibratorStateResponse[32] = {0};
     LOG_DEBUG("Get CalibratorState");
     if (!sendCommand("L", GetCalibratorStateResponse))
     {
@@ -1511,7 +1539,7 @@ void DarkLight_CoverCalibrator::getCalibratorState()
 
 void DarkLight_CoverCalibrator::getBrightness()
 {
-    char BrightnessResponse[8] = {0};
+    char BrightnessResponse[32] = {0};
     LOG_DEBUG("Getting Brightness");
     //get brightness response
     if (!sendCommand("B", BrightnessResponse))
@@ -1556,7 +1584,7 @@ void DarkLight_CoverCalibrator::setBrightness(double BrightnessValue)
     command += std::to_string(intValue);  //append value
 
     //send command
-    char response[8] = {0};
+    char response[32] = {0};
     LOG_DEBUG("Setting Brightness");
     if (!sendCommand(command.c_str(), response))
     {
@@ -1571,7 +1599,7 @@ void DarkLight_CoverCalibrator::setBrightness(double BrightnessValue)
 void DarkLight_CoverCalibrator::setAutoHeatOn()
 {
     LOG_DEBUG("Setting autoHeatOn");
-    char AutoHeatOnResponse[8] = {0};
+    char AutoHeatOnResponse[32] = {0};
     switch (AutoHeatOnSP.findOnSwitchIndex())
     {
         case Heat_AutoOn:
@@ -1621,7 +1649,7 @@ void DarkLight_CoverCalibrator::setAutoHeatOn()
 void DarkLight_CoverCalibrator::setHeatOnClose()
 {
     LOG_DEBUG("Setting HeatOnClose");
-    char HeatOnCloseResponse[8] = {0};
+    char HeatOnCloseResponse[32] = {0};
     switch (HeatOnCloseSP.findOnSwitchIndex())
     {
         case Heat_OnClose:
@@ -1670,7 +1698,7 @@ void DarkLight_CoverCalibrator::setHeatOnClose()
 
 void DarkLight_CoverCalibrator::getHeaterState()
 {
-    char HeaterStateResponse[8] = {0};
+    char HeaterStateResponse[32] = {0};
     LOG_DEBUG("Get HeaterState");
     if (!sendCommand("R", HeaterStateResponse))
     {
