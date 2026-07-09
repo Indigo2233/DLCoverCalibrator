@@ -81,6 +81,7 @@ const uint32_t SERIAL_BAUD = 115200;  // for USB serial control (ASCOM/INDI)
 #define EEPROM_ADDR_OPEN_HIGH 2
 #define EEPROM_ADDR_CLOSE_LOW 3
 #define EEPROM_ADDR_CLOSE_HIGH 4
+#define EEPROM_ADDR_STATE     5      // last known cover state (1=Closed, 3=Open)
 
 // ==================== END OF USER CONFIGURATION ====================
 
@@ -124,7 +125,16 @@ void setup() {
 
   // --- Servo ---
   capServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
-  moveToAngle(closeAngle);  // start closed
+
+  // Restore last known cover state instead of always closing
+  uint8_t savedState = EEPROM.read(EEPROM_ADDR_STATE);
+  if (savedState == COVER_OPEN) {
+    moveToAngle(openAngle);
+    currentState = COVER_OPEN;
+  } else {
+    moveToAngle(closeAngle);
+    currentState = COVER_CLOSED;
+  }
 
   // --- Button ---
   pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -295,7 +305,6 @@ void openCover() {
   currentState = COVER_MOVING;
   isMoving = true;
   moveStartTime = millis();
-  Serial.println(F("<O>"));
 }
 
 void closeCover() {
@@ -305,14 +314,12 @@ void closeCover() {
   currentState = COVER_MOVING;
   isMoving = true;
   moveStartTime = millis();
-  Serial.println(F("<C>"));
 }
 
 void haltCover() {
   if (!isMoving) return;
   isMoving = false;
   currentState = movingToOpen ? COVER_CLOSED : COVER_OPEN;
-  Serial.println(F("<H>"));
 }
 
 // Move servo to angle 0-270 (DLC uses 0-270 range internally)
@@ -339,15 +346,8 @@ void loadAnglesFromEEPROM() {
     // Safety: if both angles are the same, reset close to a sensible default
     if (openAngle == closeAngle) {
       closeAngle = (openAngle == 0) ? 180 : 0;
-      Serial.println(F("EEPROM: angles identical, reset close angle"));
     }
-
-    Serial.print(F("EEPROM loaded: open="));
-    Serial.print(openAngle);
-    Serial.print(F(" close="));
-    Serial.println(closeAngle);
   } else {
-    Serial.println(F("EEPROM: using defaults"));
     saveAnglesToEEPROM();
   }
 }
@@ -359,10 +359,6 @@ void saveAnglesToEEPROM() {
   EEPROM.write(EEPROM_ADDR_CLOSE_LOW, closeAngle & 0xFF);
   EEPROM.write(EEPROM_ADDR_CLOSE_HIGH, (closeAngle >> 8) & 0xFF);
   EEPROM.commit();
-  Serial.print(F("EEPROM saved: open="));
-  Serial.print(openAngle);
-  Serial.print(F(" close="));
-  Serial.println(closeAngle);
 }
 
 // ==================== BUTTON HANDLING ====================
@@ -419,20 +415,28 @@ void processSerialCommand() {
   if (strlen(serialBuffer) > 1) {
     param = atoi(serialBuffer + 1);
   }
+  // For two-letter commands like VO<N>, parse numeric param after 2nd char
+  int param2 = -1;
+  if (strlen(serialBuffer) > 2) {
+    param2 = atoi(serialBuffer + 2);
+  }
 
   switch (cmd) {
 
     // ── Cover Commands ─────────────────────────────────
     case 'O':  // Open cover
       openCover();
+      Serial.println(F("<O>"));
       break;
 
     case 'C':  // Close cover
       closeCover();
+      Serial.println(F("<C>"));
       break;
 
     case 'H':  // Halt (immediate stop)
       haltCover();
+      Serial.println(F("<H>"));
       break;
 
     case 'P':  // Poll cover state
@@ -525,16 +529,16 @@ void processSerialCommand() {
 
     // ── Servo Angle Configuration ──────────────────────
     case 'U':  // UO<N> set primary open angle
-      if (serialBuffer[1] == 'O' && param >= 0) {
-        openAngle = constrain(param, 0, 270);
+      if (serialBuffer[1] == 'O' && param2 >= 0) {
+        openAngle = constrain(param2, 0, 270);
         saveAnglesToEEPROM();
         Serial.print("<UO");
         Serial.print(openAngle);
         Serial.println(">");
       }
       // UC<N> set primary close angle
-      else if (serialBuffer[1] == 'C' && param >= 0) {
-        closeAngle = constrain(param, 0, 270);
+      else if (serialBuffer[1] == 'C' && param2 >= 0) {
+        closeAngle = constrain(param2, 0, 270);
         saveAnglesToEEPROM();
         Serial.print("<UC");
         Serial.print(closeAngle);
@@ -559,10 +563,11 @@ void processSerialCommand() {
     // ── Secondary servo (ignore, only one servo) ───────
     case 'V':  // VO<N>/VC<N> set secondary angles, or V version
       if (serialBuffer[1] == 'O' || serialBuffer[1] == 'C') {
-        // Secondary servo not installed, echo back
+        // Secondary servo not installed, echo back with correct param
+        int angleVal = (param2 >= 0) ? param2 : 0;
         Serial.print("<V");
         Serial.print(serialBuffer[1]);
-        Serial.print(param >= 0 ? param : 0);
+        Serial.print(angleVal);
         Serial.println(">");
       } else {
         // V alone = version query
@@ -570,8 +575,8 @@ void processSerialCommand() {
       }
       break;
 
-    case 'v':  // vO/vC query secondary angles -> return 0
-      Serial.println(F("<0>"));
+    case 'v':  // vO/vC query secondary angles -> not installed
+      Serial.println(F("<?>"));
       break;
 
     // ── Jog commands (direct servo move, no save) ──────
@@ -591,14 +596,12 @@ void processSerialCommand() {
       Serial.println(">");
       break;
 
-    case 'K':  // K<N> jog secondary (ignore)
-      Serial.print("<K");
-      Serial.print(param >= 0 ? param : 0);
-      Serial.println(">");
+    case 'K':  // K<N> jog secondary (not installed, return ?)
+      Serial.println(F("<?>"));
       break;
 
-    case 'k':  // Query secondary position -> 0
-      Serial.println(F("<0>"));
+    case 'k':  // Query secondary position (not installed, return ?)
+      Serial.println(F("<?>"));
       break;
 
     // ── System ─────────────────────────────────────────
@@ -638,6 +641,9 @@ void loop() {
       moveToAngle(targetAngle);
       isMoving = false;
       currentState = movingToOpen ? COVER_OPEN : COVER_CLOSED;
+      // Save state to EEPROM so we restore correct position after power loss
+      EEPROM.write(EEPROM_ADDR_STATE, (uint8_t)currentState);
+      EEPROM.commit();
     } else {
       // Smooth linear interpolation
       float progress = (float)elapsed / MOVE_TIME_MS;
@@ -660,5 +666,6 @@ void loop() {
     setLED(currentState == COVER_OPEN);
   }
   
-  delay(10);  // yield to WiFi stack
+  yield();   // feed ESP8266 watchdog + WiFi stack
+  delay(10); // yield to WiFi stack
 }
