@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO.Ports;
 using System.Windows.Forms;
@@ -29,8 +29,9 @@ namespace DarkLight.CoverCalibrator
 
         private static readonly Color BgColor = Color.FromArgb(45, 45, 50);
         private static readonly Color PanelBg = Color.FromArgb(55, 55, 60);
-        private static readonly Color TextColor = Color.FromArgb(230, 230, 230);
-        private static readonly Color MutedTextColor = Color.FromArgb(160, 160, 160);
+        private static readonly Color HeaderBg = Color.FromArgb(50, 50, 55);
+        private static readonly Color TextColor = Color.FromArgb(236, 236, 236);
+        private static readonly Color MutedTextColor = Color.FromArgb(172, 172, 172);
         private static readonly Color AccentColor = Color.FromArgb(60, 120, 215);
         private static readonly Color BtnBg = Color.FromArgb(75, 75, 80);
         private static readonly Color BtnHover = Color.FromArgb(95, 95, 100);
@@ -40,6 +41,8 @@ namespace DarkLight.CoverCalibrator
         public SetupDialogForm(Driver driver)
         {
             _driver = driver;
+            if (_driver.Connected)
+                _driver.ReadDeviceAngles();
 
             InitializeComponent();
             LoadValues();
@@ -50,239 +53,310 @@ namespace DarkLight.CoverCalibrator
 
         private void InitializeComponent()
         {
+            SuspendLayout();
+
+            AutoScaleMode = AutoScaleMode.Dpi;
             Text = "DarkLight Cover Calibrator — Setup";
-            Size = new Size(760, 740);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
+            ClientSize = new Size(860, 620);
+            MinimumSize = new Size(820, 560);
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = BgColor;
             ForeColor = TextColor;
-            Font = new Font("Microsoft YaHei UI", 9.5F);
+            Font = new Font("Microsoft YaHei UI", 10F);
 
-            int y = 12;
-
-            // ── Serial Connection Bar ──
-            var pnlSerial = new Panel
+            var scrollHost = new Panel
             {
-                Location = new Point(12, y),
-                Size = new Size(720, 40),
-                BackColor = PanelBg,
-                Padding = new Padding(10, 6, 10, 6)
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = BgColor,
+                Padding = new Padding(10)
             };
-            Controls.Add(pnlSerial);
+            Controls.Add(scrollHost);
 
-            pnlSerial.Controls.Add(MakeLabel("COM:", 10, 8, 40, 22, TextColor));
-            _cmbPort = new ComboBox
+            var main = new TableLayoutPanel
             {
-                Location = new Point(52, 8), Width = 88,
-                DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat,
-                BackColor = BtnBg, ForeColor = TextColor,
-                Font = new Font("Microsoft YaHei UI", 9.5F)
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = BgColor,
+                ColumnCount = 1,
+                RowCount = 5,
+                Padding = new Padding(0),
+                Margin = new Padding(0)
             };
-            pnlSerial.Controls.Add(_cmbPort);
-
-            var btnRefresh = MakeButton("\u21bb", 144, 7, 30, 24);
-            btnRefresh.Click += (s, e) => RefreshPorts();
-            pnlSerial.Controls.Add(btnRefresh);
-
-            pnlSerial.Controls.Add(MakeLabel("Baud:", 184, 8, 40, 22, TextColor));
-            _cmbBaud = new ComboBox
+            main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            for (int i = 0; i < main.RowCount; i++)
             {
-                Location = new Point(226, 8), Width = 76,
-                DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat,
-                BackColor = BtnBg, ForeColor = TextColor,
-                Font = new Font("Microsoft YaHei UI", 9.5F)
-            };
-            _cmbBaud.Items.AddRange(new object[] { "9600", "19200", "38400", "57600", "115200", "230400" });
-            pnlSerial.Controls.Add(_cmbBaud);
+                main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
+            scrollHost.Controls.Add(main);
 
-            _btnConnect = MakeButton("\u8fde\u63a5", 314, 6, 80, 26);
-            _btnConnect.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
-            _btnConnect.Click += BtnConnect_Click;
-            pnlSerial.Controls.Add(_btnConnect);
+            main.Controls.Add(CreateSerialBar(), 0, 0);
+            main.Controls.Add(CreateSection("设备控制", CreateDeviceControlPanel()), 0, 1);
+            main.Controls.Add(CreateServoPanel("主舵机角度", true), 0, 2);
+            main.Controls.Add(CreateServoPanel("副舵机角度", false), 0, 3);
+            main.Controls.Add(CreateBottomBar(), 0, 4);
 
-            _lblConnected = MakeLabel("", 406, 8, 110, 22, MutedTextColor);
-            _lblConnected.Font = new Font("Microsoft YaHei UI", 9.5F);
-            pnlSerial.Controls.Add(_lblConnected);
-
-            _lblFirmware = MakeLabel("", 526, 8, 180, 22, MutedTextColor);
-            _lblFirmware.Font = new Font("Microsoft YaHei UI", 9F);
-            _lblFirmware.TextAlign = ContentAlignment.MiddleRight;
-            pnlSerial.Controls.Add(_lblFirmware);
-
-            y += 52;
-
-            // ── Device Control ──
-            var grpControl = new GroupBox
-            {
-                Text = "  设备控制",
-                Location = new Point(12, y),
-                Size = new Size(720, 170),
-                BackColor = PanelBg, ForeColor = TextColor,
-                Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold)
-            };
-            Controls.Add(grpControl);
-            CreateDeviceControlPanel(grpControl);
-            y += 184;
-
-            // ── Primary Servo ──
-            var grpPrimary = CreateServoPanel("主舵机角度", true, 12, y, 720, 150);
-            Controls.Add(grpPrimary);
-            y += 164;
-
-            // ── Secondary Servo ──
-            var grpSecondary = CreateServoPanel("副舵机角度", false, 12, y, 720, 150);
-            Controls.Add(grpSecondary);
-            y += 166;
-
-            // ── Bottom Buttons ──
-            var btnReset = MakeButton("重置默认角度", 12, y + 4, 120, 32);
-            btnReset.Font = new Font("Microsoft YaHei UI", 9F);
-            btnReset.Click += BtnReset_Click;
-            Controls.Add(btnReset);
-
-            var btnDone = MakeButton("保存并关闭", 612, y + 4, 120, 32);
-            btnDone.BackColor = AccentColor;
-            btnDone.ForeColor = Color.White;
-            btnDone.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
-            btnDone.DialogResult = DialogResult.OK;
-            btnDone.Click += BtnDone_Click;
-            Controls.Add(btnDone);
-
-            AcceptButton = btnDone;
+            AcceptButton = main.GetControlFromPosition(0, 4) is TableLayoutPanel bottom
+                ? bottom.GetControlFromPosition(2, 0) as Button
+                : null;
 
             foreach (Control c in GetAllControls(this))
             {
                 if (c is Button btn) AttachHover(btn);
             }
+
+            ResumeLayout(false);
         }
 
-        private void CreateDeviceControlPanel(GroupBox parent)
+        private Control CreateSerialBar()
         {
-            // ── Row 1: Cover Control ──
-            parent.Controls.Add(MakeLabel("盖板", 18, 28, 48, 24, TextColor));
-            _lblCoverState = MakeLabel("", 66, 28, 120, 24, MutedTextColor);
-            _lblCoverState.Font = new Font("Microsoft YaHei UI", 9.5F);
-            parent.Controls.Add(_lblCoverState);
-            AddCmdBtn(parent, "开盖", 195, 26, 64, 30, "O");
-            AddCmdBtn(parent, "关盖", 265, 26, 64, 30, "C");
-            AddCmdBtn(parent, "停止", 335, 26, 64, 30, "H");
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = PanelBg,
+                ColumnCount = 8,
+                RowCount = 1,
+                Padding = new Padding(12, 10, 12, 10),
+                Margin = new Padding(0, 0, 0, 8)
+            };
 
-            // ── Row 2: Light Panel ──
-            parent.Controls.Add(MakeLabel("平场灯", 18, 68, 56, 24, TextColor));
-            _lblCalibratorState = MakeLabel("", 76, 68, 110, 24, MutedTextColor);
-            _lblCalibratorState.Font = new Font("Microsoft YaHei UI", 9.5F);
-            parent.Controls.Add(_lblCalibratorState);
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 46));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 56));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-            parent.Controls.Add(MakeLabel("亮度", 195, 66, 36, 20, TextColor));
+            table.Controls.Add(MakeLabel("COM:", TextColor), 0, 0);
+
+            _cmbPort = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = BtnBg,
+                ForeColor = TextColor,
+                Font = Font,
+                Margin = new Padding(4, 2, 4, 2)
+            };
+            table.Controls.Add(_cmbPort, 1, 0);
+
+            var btnRefresh = MakeButton("↻", new Size(38, 34));
+            btnRefresh.Click += (s, e) => RefreshPorts();
+            table.Controls.Add(btnRefresh, 2, 0);
+
+            table.Controls.Add(MakeLabel("Baud:", TextColor), 3, 0);
+
+            _cmbBaud = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = BtnBg,
+                ForeColor = TextColor,
+                Font = Font,
+                Margin = new Padding(4, 2, 8, 2)
+            };
+            _cmbBaud.Items.AddRange(new object[] { "9600", "19200", "38400", "57600", "115200", "230400" });
+            table.Controls.Add(_cmbBaud, 4, 0);
+
+            _btnConnect = MakeButton("连接", new Size(96, 34));
+            _btnConnect.Font = new Font(Font, FontStyle.Bold);
+            _btnConnect.Click += BtnConnect_Click;
+            table.Controls.Add(_btnConnect, 5, 0);
+
+            _lblConnected = MakeLabel("", MutedTextColor);
+            table.Controls.Add(_lblConnected, 6, 0);
+
+            _lblFirmware = MakeLabel("", MutedTextColor, ContentAlignment.MiddleRight);
+            _lblFirmware.Font = new Font(Font.FontFamily, 9F);
+            table.Controls.Add(_lblFirmware, 7, 0);
+
+            return table;
+        }
+
+        private Control CreateDeviceControlPanel()
+        {
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = false,
+                BackColor = PanelBg,
+                ColumnCount = 3,
+                RowCount = 4,
+                Height = 168,
+                Padding = new Padding(10, 8, 10, 8),
+                Margin = new Padding(0)
+            };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+
+            _lblCoverState = MakeStatusLabel();
+            AddDeviceRow(table, 0, "盖板", _lblCoverState, CreateCoverButtons());
+
+            _lblCalibratorState = MakeStatusLabel();
+            AddDeviceRow(table, 1, "平场灯", _lblCalibratorState, CreateLightControls());
+
+            _lblHeaterState = MakeStatusLabel();
+            AddDeviceRow(table, 2, "加热", _lblHeaterState, CreateHeaterButtons());
+
+            _lblSensor = MakeLabel("", MutedTextColor, ContentAlignment.MiddleLeft, new Size(520, 22));
+            _lblSensor.Font = new Font(Font.FontFamily, 9F);
+            table.Controls.Add(_lblSensor, 2, 3);
+
+            return table;
+        }
+
+        private void AddDeviceRow(TableLayoutPanel table, int row, string title, Label status, Control controls)
+        {
+            table.Controls.Add(MakeLabel(title, TextColor), 0, row);
+            table.Controls.Add(status, 1, row);
+            table.Controls.Add(controls, 2, row);
+        }
+
+        private Control CreateCoverButtons()
+        {
+            var flow = MakeFlow();
+            AddCmdBtn(flow, "开盖", "O");
+            AddCmdBtn(flow, "关盖", "C");
+            AddCmdBtn(flow, "停止", "H");
+            return flow;
+        }
+
+        private Control CreateLightControls()
+        {
+            var flow = MakeFlow();
+            flow.Controls.Add(MakeLabel("亮度", TextColor, ContentAlignment.MiddleLeft, new Size(48, 34)));
+
             _trkBrightness = new TrackBar
             {
-                Location = new Point(232, 62), Size = new Size(180, 38),
-                Minimum = 0, Maximum = 255, TickFrequency = 51,
-                BackColor = PanelBg
+                Size = new Size(220, 38),
+                Minimum = 0,
+                Maximum = 255,
+                TickFrequency = 51,
+                BackColor = PanelBg,
+                Margin = new Padding(4, 0, 4, 0)
             };
             _trkBrightness.Scroll += BrightnessControl_Changed;
-            parent.Controls.Add(_trkBrightness);
+            flow.Controls.Add(_trkBrightness);
 
             _numBrightness = new NumericUpDown
             {
-                Location = new Point(418, 65), Size = new Size(58, 22),
-                Minimum = 0, Maximum = 255,
-                BackColor = BtnBg, ForeColor = TextColor,
-                Font = new Font("Microsoft YaHei UI", 9.5F)
+                Size = new Size(78, 34),
+                Minimum = 0,
+                Maximum = 255,
+                BackColor = BtnBg,
+                ForeColor = TextColor,
+                Font = Font,
+                TextAlign = HorizontalAlignment.Center,
+                Margin = new Padding(4, 4, 4, 0)
             };
             _numBrightness.ValueChanged += BrightnessControl_Changed;
-            parent.Controls.Add(_numBrightness);
+            flow.Controls.Add(_numBrightness);
 
-            _lblBrightness = MakeLabel("", 480, 66, 56, 24, MutedTextColor);
-            parent.Controls.Add(_lblBrightness);
-            AddLightBtn(parent, "开灯", 542, 64, 48, 30, true);
-            AddLightBtn(parent, "关灯", 596, 64, 48, 30, false);
+            _lblBrightness = MakeLabel("", MutedTextColor, ContentAlignment.MiddleLeft, new Size(56, 34));
+            flow.Controls.Add(_lblBrightness);
 
-            // ── Row 3: Heater ──
-            parent.Controls.Add(MakeLabel("加热", 18, 112, 48, 24, TextColor));
-            _lblHeaterState = MakeLabel("", 66, 112, 110, 24, MutedTextColor);
-            _lblHeaterState.Font = new Font("Microsoft YaHei UI", 9.5F);
-            parent.Controls.Add(_lblHeaterState);
-            AddCmdBtn(parent, "手动开", 195, 110, 58, 28, "W");
-            AddCmdBtn(parent, "关闭",  259, 110, 48, 28, "w");
-            AddCmdBtn(parent, "自动开", 313, 110, 58, 28, "Q");
-            AddCmdBtn(parent, "自动关", 377, 110, 58, 28, "q");
-            AddCmdBtn(parent, "关盖开", 441, 110, 58, 28, "E");
-            AddCmdBtn(parent, "关盖关", 505, 110, 58, 28, "e");
+            AddLightBtn(flow, "开灯", true);
+            AddLightBtn(flow, "关灯", false);
 
-            var btnSensor = MakeButton("传感器", 570, 110, 60, 28);
-            btnSensor.Click += BtnSensor_Click;
-            parent.Controls.Add(btnSensor);
-
-            _lblSensor = MakeLabel("", 195, 140, 510, 20, MutedTextColor);
-            _lblSensor.Font = new Font("Microsoft YaHei UI", 8.5F);
-            parent.Controls.Add(_lblSensor);
+            return flow;
         }
 
-        private GroupBox CreateServoPanel(string title, bool isPrimary, int x, int y, int w, int h)
+        private Control CreateHeaterButtons()
         {
-            var grp = new GroupBox
-            {
-                Text = "  " + title,
-                Location = new Point(x, y),
-                Size = new Size(w, h),
-                BackColor = PanelBg, ForeColor = TextColor,
-                Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold)
-            };
+            var flow = MakeFlow();
+            AddCmdBtn(flow, "手动开", "W", new Size(72, 32));
+            AddCmdBtn(flow, "关闭", "w", new Size(64, 32));
+            AddCmdBtn(flow, "自动开", "Q", new Size(72, 32));
+            AddCmdBtn(flow, "自动关", "q", new Size(72, 32));
+            AddCmdBtn(flow, "关盖开", "E", new Size(72, 32));
+            AddCmdBtn(flow, "关盖关", "e", new Size(72, 32));
 
-            CreateAngleRow(grp, isPrimary, false, 28);  // Open row
-            CreateAngleRow(grp, isPrimary, true, 94);    // Close row
-            return grp;
+            var btnSensor = MakeButton("传感器", new Size(72, 32));
+            btnSensor.Click += BtnSensor_Click;
+            flow.Controls.Add(btnSensor);
+
+            return flow;
         }
 
-        private void CreateAngleRow(GroupBox parent, bool isPrimary, bool isClose, int y)
+        private Control CreateServoPanel(string title, bool isPrimary)
+        {
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = PanelBg,
+                ColumnCount = 4,
+                RowCount = 2,
+                Padding = new Padding(8, 6, 8, 6),
+                Margin = new Padding(0)
+            };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 76));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            table.Height = 92;
+
+            CreateAngleRow(table, isPrimary, false, 0);
+            CreateAngleRow(table, isPrimary, true, 1);
+
+            return CreateSection(title, table);
+        }
+
+        private void CreateAngleRow(TableLayoutPanel parent, bool isPrimary, bool isClose, int row)
         {
             string labelText = isClose ? "关闭位置" : "打开位置";
             Color accent = isClose ? CloseColor : OpenColor;
 
-            // Label
-            parent.Controls.Add(MakeLabel(labelText, 18, y + 4, 68, 22, accent));
+            parent.Controls.Add(MakeLabel(labelText, accent), 0, row);
 
-            // Angle value display
             int currentAngle = GetSavedAngle(isPrimary, isClose);
-            var valueLabel = MakeLabel($"{currentAngle}°", 92, y, 60, 30, TextColor);
-            valueLabel.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold);
-            valueLabel.TextAlign = ContentAlignment.MiddleLeft;
-            parent.Controls.Add(valueLabel);
+            var valueLabel = MakeLabel($"{currentAngle}°", TextColor, ContentAlignment.MiddleLeft, new Size(68, 32));
+            valueLabel.Font = new Font(Font.FontFamily, 14F, FontStyle.Bold);
+            parent.Controls.Add(valueLabel, 1, row);
 
             if (isPrimary && isClose) _lblPrimaryCloseVal = valueLabel;
             if (isPrimary && !isClose) _lblPrimaryOpenVal = valueLabel;
             if (!isPrimary && isClose) _lblSecondaryCloseVal = valueLabel;
             if (!isPrimary && !isClose) _lblSecondaryOpenVal = valueLabel;
 
-            // Save as Open/Close button
-            var btnSet = MakeButton(isClose ? "保存为关闭" : "保存为打开", 165, y, 110, 30);
-            btnSet.Font = new Font("Microsoft YaHei UI", 9F);
+            var btnSet = MakeButton(isClose ? "保存为关闭" : "保存为打开", new Size(118, 30));
             btnSet.Click += (s, e) =>
             {
                 if (!EnsureConnected()) return;
-                int pos = isPrimary ? _driver.GetPrimaryPosition() : _driver.GetSecondaryPosition();
+                int pos = ParseAngleLabel(valueLabel, GetSavedAngle(isPrimary, isClose));
                 SaveAngle(isPrimary, isClose, pos);
                 valueLabel.Text = $"{pos}°";
             };
-            parent.Controls.Add(btnSet);
+            parent.Controls.Add(btnSet, 2, row);
 
-            // Jog buttons
-            AddJogButtons(parent, 295, y + 1, isPrimary, isClose, valueLabel);
+            parent.Controls.Add(CreateJogButtons(isPrimary, valueLabel), 3, row);
         }
 
-        private void AddJogButtons(Control parent, int x, int y, bool isPrimary, bool isClose, Label valLabel)
+        private Control CreateJogButtons(bool isPrimary, Label valueLabel)
         {
+            var flow = MakeFlow();
             int[] steps = { -45, -10, -1, 1, 10, 45 };
-            int cx = x;
 
             foreach (var step in steps)
             {
                 string text = step > 0 ? $"+{step}" : $"{step}";
-                int width = Math.Abs(step) >= 10 ? 48 : 42;
-                var btn = MakeButton(text, cx, y, width, 28);
+                var btn = MakeButton(text, new Size(52, 30));
                 btn.Tag = step;
                 btn.Click += (s, e) =>
                 {
@@ -297,12 +371,99 @@ namespace DarkLight.CoverCalibrator
                     else
                         _driver.JogSecondary(newAngle);
 
-                    SaveAngle(isPrimary, isClose, newAngle);
-                    valLabel.Text = $"{newAngle}°";
+                    valueLabel.Text = $"{newAngle}°";
                 };
-                parent.Controls.Add(btn);
-                cx += width + 10;
+                flow.Controls.Add(btn);
             }
+
+            return flow;
+        }
+
+        private Control CreateBottomBar()
+        {
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = BgColor,
+                ColumnCount = 3,
+                RowCount = 1,
+                Padding = new Padding(0, 10, 0, 0),
+                Margin = new Padding(0)
+            };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
+
+            var btnReset = MakeButton("重置默认角度", new Size(150, 38));
+            btnReset.Click += BtnReset_Click;
+            table.Controls.Add(btnReset, 0, 0);
+
+            var spacer = new Label { Dock = DockStyle.Fill };
+            table.Controls.Add(spacer, 1, 0);
+
+            var btnDone = MakeButton("保存并关闭", new Size(150, 38));
+            btnDone.BackColor = AccentColor;
+            btnDone.ForeColor = Color.White;
+            btnDone.Font = new Font(Font, FontStyle.Bold);
+            btnDone.DialogResult = DialogResult.OK;
+            btnDone.Click += BtnDone_Click;
+            table.Controls.Add(btnDone, 2, 0);
+
+            return table;
+        }
+
+        private Control CreateSection(string title, Control content)
+        {
+            var section = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = PanelBg,
+                ColumnCount = 1,
+                RowCount = 2,
+                Padding = new Padding(1),
+                Margin = new Padding(0, 0, 0, 12)
+            };
+            section.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            section.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            section.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var header = new Label
+            {
+                Text = title,
+                Dock = DockStyle.Top,
+                Height = 30,
+                BackColor = HeaderBg,
+                ForeColor = TextColor,
+                Font = new Font(Font.FontFamily, 10F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(12, 0, 0, 0),
+                Margin = new Padding(0)
+            };
+            section.Controls.Add(header, 0, 0);
+
+            content.Dock = DockStyle.Top;
+            section.Controls.Add(content, 0, 1);
+
+            return section;
+        }
+
+        private FlowLayoutPanel MakeFlow()
+        {
+            return new FlowLayoutPanel
+            {
+                Dock = DockStyle.None,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = PanelBg,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                Anchor = AnchorStyles.Left | AnchorStyles.Top,
+                WrapContents = false
+            };
         }
 
         private void LoadValues()
@@ -403,6 +564,9 @@ namespace DarkLight.CoverCalibrator
         {
             try
             {
+                UseWaitCursor = true;
+                _btnConnect.Enabled = false;
+
                 if (_driver.Connected)
                 {
                     _driver.Connected = false;
@@ -415,12 +579,18 @@ namespace DarkLight.CoverCalibrator
                 }
 
                 UpdateConnectionStatus();
+                RefreshAngleLabels();
                 RefreshDeviceStatus();
             }
             catch (Exception ex)
             {
                 UpdateConnectionStatus();
                 ShowError(ex);
+            }
+            finally
+            {
+                _btnConnect.Enabled = true;
+                UseWaitCursor = false;
             }
         }
 
@@ -440,16 +610,21 @@ namespace DarkLight.CoverCalibrator
             _syncingBrightness = false;
         }
 
-        private void AddCmdBtn(Control parent, string text, int x, int y, int w, int h, string command)
+        private void AddCmdBtn(Control parent, string text, string command)
         {
-            var button = MakeButton(text, x, y, w, h);
+            AddCmdBtn(parent, text, command, new Size(70, 34));
+        }
+
+        private void AddCmdBtn(Control parent, string text, string command, Size size)
+        {
+            var button = MakeButton(text, size);
             button.Click += (s, e) => SendCommand(command);
             parent.Controls.Add(button);
         }
 
-        private void AddLightBtn(Control parent, string text, int x, int y, int w, int h, bool turnOn)
+        private void AddLightBtn(Control parent, string text, bool turnOn)
         {
-            var button = MakeButton(text, x, y, w, h);
+            var button = MakeButton(text, new Size(70, 34));
             button.Click += (s, e) =>
             {
                 if (!EnsureConnected()) return;
@@ -534,6 +709,23 @@ namespace DarkLight.CoverCalibrator
             return isClose ? _driver.SecondaryCloseAngle : _driver.SecondaryOpenAngle;
         }
 
+        private void RefreshAngleLabels()
+        {
+            if (_driver.Connected)
+                _driver.ReadDeviceAngles();
+
+            if (_lblPrimaryOpenVal != null) _lblPrimaryOpenVal.Text = $"{_driver.PrimaryOpenAngle}\u00b0";
+            if (_lblPrimaryCloseVal != null) _lblPrimaryCloseVal.Text = $"{_driver.PrimaryCloseAngle}\u00b0";
+            if (_lblSecondaryOpenVal != null) _lblSecondaryOpenVal.Text = $"{_driver.SecondaryOpenAngle}\u00b0";
+            if (_lblSecondaryCloseVal != null) _lblSecondaryCloseVal.Text = $"{_driver.SecondaryCloseAngle}\u00b0";
+        }
+
+        private static int ParseAngleLabel(Label label, int fallback)
+        {
+            var text = (label.Text ?? string.Empty).Replace("\u00b0", string.Empty).Trim();
+            return int.TryParse(text, out int angle) ? angle : fallback;
+        }
+
         private void SaveAngle(bool isPrimary, bool isClose, int angle)
         {
             if (isPrimary && isClose) _driver.SetPrimaryCloseAngle(angle);
@@ -542,35 +734,54 @@ namespace DarkLight.CoverCalibrator
             if (!isPrimary && !isClose) _driver.SetSecondaryOpenAngle(angle);
         }
 
-        private Button MakeButton(string text, int x, int y, int w, int h)
+        private Button MakeButton(string text, Size size)
         {
             return new Button
             {
                 Text = text,
-                Location = new Point(x, y),
-                Size = new Size(w, h),
+                Size = size,
+                MinimumSize = size,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = BtnBg,
                 ForeColor = TextColor,
-                Font = new Font("Microsoft YaHei UI", 9F),
-                Margin = new Padding(0),
-                Padding = new Padding(2)
+                Font = Font,
+                Margin = new Padding(3),
+                Padding = new Padding(3, 0, 3, 0),
+                UseVisualStyleBackColor = false
             };
         }
 
-        private Label MakeLabel(string text, int x, int y, int w, int h, Color color)
+        private Label MakeStatusLabel()
+        {
+            var label = MakeLabel("", MutedTextColor);
+            label.Font = new Font(Font, FontStyle.Bold);
+            return label;
+        }
+
+        private Label MakeLabel(string text, Color color)
+        {
+            return MakeLabel(text, color, ContentAlignment.MiddleLeft, new Size(0, 30));
+        }
+
+        private Label MakeLabel(string text, Color color, ContentAlignment align)
+        {
+            return MakeLabel(text, color, align, new Size(0, 30));
+        }
+
+        private Label MakeLabel(string text, Color color, ContentAlignment align, Size size)
         {
             return new Label
             {
                 Text = text,
-                Location = new Point(x, y),
-                Size = new Size(w, h),
+                Dock = size.Width == 0 ? DockStyle.Fill : DockStyle.None,
+                Size = size.Width == 0 ? new Size(10, size.Height) : size,
+                MinimumSize = size.Width == 0 ? new Size(0, size.Height) : size,
                 ForeColor = color,
                 AutoEllipsis = true,
-                Font = new Font("Microsoft YaHei UI", 9.5F),
-                TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(0),
-                Padding = new Padding(0)
+                Font = Font,
+                TextAlign = align,
+                Margin = new Padding(2),
+                Padding = new Padding(2, 0, 2, 0)
             };
         }
 

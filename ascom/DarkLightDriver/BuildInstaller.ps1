@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = "Release",
-    [switch]$BuildExe
+    [switch]$BuildExe,
+    [switch]$Install
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,45 @@ $outputDir = Join-Path $driverRoot "bin\$Configuration\net48"
 $distDir = Join-Path $driverRoot "dist"
 $exePath = Join-Path $distDir "DarkLight_CoverCalibrator_ASCOM_Setup.exe"
 $zipPath = Join-Path $distDir "DarkLight_CoverCalibrator_ASCOM_ManualInstall.zip"
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Invoke-ManualInstall {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PackagePath
+    )
+
+    $installStage = Join-Path $env:TEMP ("DarkLightDriverInstall_" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $installStage | Out-Null
+    try {
+        Expand-Archive -LiteralPath $PackagePath -DestinationPath $installStage -Force
+        $installCmd = Join-Path $installStage "install.cmd"
+        if (-not (Test-Path -LiteralPath $installCmd)) {
+            throw "install.cmd was not found in package: $PackagePath"
+        }
+
+        $arguments = "/c ""$installCmd"" /quiet"
+        if (Test-IsAdministrator) {
+            $process = Start-Process -FilePath $env:ComSpec -ArgumentList $arguments -Wait -PassThru
+        }
+        else {
+            Write-Host "Administrator privileges required. Approve the UAC prompt to install."
+            $process = Start-Process -FilePath $env:ComSpec -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+        }
+
+        if ($process.ExitCode -ne 0) {
+            throw "Installer failed with exit code $($process.ExitCode)"
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $installStage -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 dotnet build $projectPath -c $Configuration
 
@@ -147,6 +187,10 @@ SourceFiles1=$outputDir\
     finally {
         Remove-Item -LiteralPath $sedPath -Force -ErrorAction SilentlyContinue
     }
+}
+
+if ($Install) {
+    Invoke-ManualInstall -PackagePath $zipPath
 }
 
 $outputs
