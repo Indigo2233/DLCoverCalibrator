@@ -1,4 +1,4 @@
-using ASCOM;
+﻿using ASCOM;
 using ASCOM.DeviceInterface;
 using ASCOM.Utilities;
 using System;
@@ -43,6 +43,8 @@ namespace DarkLight.CoverCalibrator
         private int _primaryCloseAngle = 180;
         private int _secondaryOpenAngle = 0;
         private int _secondaryCloseAngle = 180;
+        private int? _primaryCurrentPosition;
+        private int? _secondaryCurrentPosition;
         private string _portName = "COM3";
         private int _baudRate = 115200;
         private int _pollIntervalMs = 1000;
@@ -136,6 +138,11 @@ namespace DarkLight.CoverCalibrator
 
             // Wait for cover to finish moving (with timeout)
             WaitForCoverSettle(false);
+            if (_coverStatus == CoverStatus.Open)
+            {
+                _primaryCurrentPosition = _primaryOpenAngle;
+                _secondaryCurrentPosition = _secondaryOpenAngle;
+            }
         }
 
         public void CloseCover()
@@ -154,6 +161,11 @@ namespace DarkLight.CoverCalibrator
 
             // Wait for cover to finish moving (with timeout)
             WaitForCoverSettle(true);
+            if (_coverStatus == CoverStatus.Closed)
+            {
+                _primaryCurrentPosition = _primaryCloseAngle;
+                _secondaryCurrentPosition = _secondaryCloseAngle;
+            }
         }
 
         public void HaltCover()
@@ -359,8 +371,10 @@ namespace DarkLight.CoverCalibrator
             }
             LogMessage("Connect", "Handshake successful");
 
-            // Sync angles
-            SyncAngles();
+            _connected = true;
+
+            // Use the firmware EEPROM angles as the source of truth on connect.
+            ReadDeviceAngles();
 
             // Read initial state
             RefreshState();
@@ -371,7 +385,6 @@ namespace DarkLight.CoverCalibrator
             _pollTimer.AutoReset = true;
             _pollTimer.Start();
 
-            _connected = true;
             LogMessage("Connect", "Driver connected successfully");
             }
             finally
@@ -394,6 +407,8 @@ namespace DarkLight.CoverCalibrator
             _coverStatus = CoverStatus.Unknown;
             _calibratorStatus = CalibratorStatus.Unknown;
             _heaterState = 4;
+            _primaryCurrentPosition = null;
+            _secondaryCurrentPosition = null;
         }
 
         // ────────────────────────────────────────────────────────────
@@ -493,6 +508,38 @@ namespace DarkLight.CoverCalibrator
             LogMessage("SyncAngles", $"Readback Primary: Open={po} Close={pc}");
         }
 
+        public void ReadDeviceAngles()
+        {
+            if (!_connected) return;
+
+            bool changed = false;
+
+            changed |= TryReadDeviceAngle("uO", ref _primaryOpenAngle, "PrimaryOpenAngle");
+            changed |= TryReadDeviceAngle("i", ref _primaryCloseAngle, "PrimaryCloseAngle");
+            changed |= TryReadDeviceAngle("vO", ref _secondaryOpenAngle, "SecondaryOpenAngle");
+            changed |= TryReadDeviceAngle("vC", ref _secondaryCloseAngle, "SecondaryCloseAngle");
+
+            if (changed)
+                WriteProfile();
+        }
+
+        private bool TryReadDeviceAngle(string command, ref int field, string name)
+        {
+            var response = _device.SendCommand(command);
+            LogMessage("ReadDeviceAngles", $"{command} -> {response}");
+
+            if (response == null || response == "?" || !int.TryParse(response, out int value))
+                return false;
+
+            value = Clamp(value, 0, MaxServoAngle);
+            if (field == value)
+                return false;
+
+            field = value;
+            LogMessage("ReadDeviceAngles", $"{name}={value}");
+            return true;
+        }
+
         public void SetPrimaryOpenAngle(int angle)
         {
             angle = Clamp(angle, 0, MaxServoAngle);
@@ -566,8 +613,11 @@ namespace DarkLight.CoverCalibrator
             angle = Clamp(angle, 0, MaxServoAngle);
             if (_connected)
             {
+                HaltMotionBeforeJog();
                 var resp = _device.SendCommand($"J{angle}");
                 LogMessage("JogPrimary", $"angle={angle} resp={resp}");
+                if (resp != null && resp != "?")
+                    _primaryCurrentPosition = angle;
             }
             return angle;
         }
@@ -575,10 +625,15 @@ namespace DarkLight.CoverCalibrator
         /// <summary>Get primary servo current physical position. Requires connected.</summary>
         public int GetPrimaryPosition()
         {
+            if (_primaryCurrentPosition.HasValue)
+                return _primaryCurrentPosition.Value;
             if (!_connected) return _primaryCloseAngle;
             var resp = _device.SendCommand("j");
             if (resp != null && int.TryParse(resp, out int pos))
+            {
+                _primaryCurrentPosition = pos;
                 return pos;
+            }
             return _primaryCloseAngle;
         }
 
@@ -588,8 +643,11 @@ namespace DarkLight.CoverCalibrator
             angle = Clamp(angle, 0, MaxServoAngle);
             if (_connected)
             {
+                HaltMotionBeforeJog();
                 var resp = _device.SendCommand($"K{angle}");
                 LogMessage("JogSecondary", $"angle={angle} resp={resp}");
+                if (resp != null && resp != "?")
+                    _secondaryCurrentPosition = angle;
             }
             return angle;
         }
@@ -597,10 +655,15 @@ namespace DarkLight.CoverCalibrator
         /// <summary>Get secondary servo current physical position. Requires connected.</summary>
         public int GetSecondaryPosition()
         {
+            if (_secondaryCurrentPosition.HasValue)
+                return _secondaryCurrentPosition.Value;
             if (!_connected) return _secondaryCloseAngle;
             var resp = _device.SendCommand("k");
             if (resp != null && int.TryParse(resp, out int pos))
+            {
+                _secondaryCurrentPosition = pos;
                 return pos;
+            }
             return _secondaryCloseAngle;
         }
 
@@ -700,6 +763,17 @@ namespace DarkLight.CoverCalibrator
             if (!_connected)
                 throw new ASCOM.NotConnectedException($"{method}: Driver is not connected");
             return true;
+        }
+
+        private void HaltMotionBeforeJog()
+        {
+            if (_coverStatus != CoverStatus.Moving)
+                return;
+
+            var resp = _device.SendCommand("H");
+            LogMessage("HaltMotionBeforeJog", $"device response: {resp}");
+            _coverStatus = CoverStatus.Unknown;
+            Thread.Sleep(50);
         }
 
         private void WaitForCoverSettle(bool closing)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO.Ports;
 using System.Text;
 using System.Threading;
@@ -14,7 +14,7 @@ namespace DarkLight.CoverCalibrator
     {
         private SerialPort _serialPort;
         private readonly object _lock = new object();
-        private const int ReadTimeoutMs = 3000;
+        private const int ReadTimeoutMs = 5000;
         private const int WriteTimeoutMs = 2000;
         private const int MaxRetries = 3;
 
@@ -33,8 +33,8 @@ namespace DarkLight.CoverCalibrator
                 {
                     ReadTimeout = ReadTimeoutMs,
                     WriteTimeout = WriteTimeoutMs,
-                    DtrEnable = true,
-                    RtsEnable = true,
+                    DtrEnable = false,
+                    RtsEnable = false,
                     NewLine = "\n"
                 };
                 _serialPort.Open();
@@ -53,7 +53,11 @@ namespace DarkLight.CoverCalibrator
                     try
                     {
                         if (_serialPort.IsOpen)
+                        {
+                            _serialPort.DtrEnable = false;
+                            _serialPort.RtsEnable = false;
                             _serialPort.Close();
+                        }
                     }
                     catch { /* ignore */ }
                     _serialPort.Dispose();
