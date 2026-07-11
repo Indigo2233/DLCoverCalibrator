@@ -7,6 +7,10 @@ namespace DarkLight.CoverCalibrator
 {
     public class SetupDialogForm : Form
     {
+        // All layout values below are designed at the Windows standard 96 DPI.
+        // Explicitly declaring this keeps a code-created form consistent across ASCOM hosts.
+        private static readonly SizeF DesignDpi = new SizeF(96F, 96F);
+
         private readonly Driver _driver;
         private bool _syncingBrightness;
 
@@ -56,6 +60,7 @@ namespace DarkLight.CoverCalibrator
             SuspendLayout();
 
             AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = DesignDpi;
             Text = "DarkLight Cover Calibrator — Setup";
             ClientSize = new Size(860, 620);
             MinimumSize = new Size(820, 560);
