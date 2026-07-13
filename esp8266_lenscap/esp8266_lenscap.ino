@@ -3,7 +3,7 @@
   Board:   Wemos D1 Mini / NodeMCU (ESP8266)
   Author:  Generated for DLCoverCalibrator project
   Date:    2025-07-06
-  Version: 1.1.2
+  Version: 1.1.0
 
   Description: WiFi-controlled telescope lens cap using a servo.
                - Built-in web server for phone/browser control
@@ -16,7 +16,6 @@
     - Servo: signal -> D2 (GPIO4), power -> external 5V
     - Button: D1 (GPIO5) -> GND (internal pullup)
     - Optional LED: D3 (GPIO0) -> GND (active LOW on some boards, check your model)
-    - Flat panel MOSFET PWM: D5 (GPIO14) -> driver PWM input
 
   Power: Servo MUST be powered from external 5V, NOT from 3.3V pin.
          When powered via USB, the 5V pin provides USB power (sufficient for SG90).
@@ -62,7 +61,7 @@ const uint16_t SERVO_MIN_US = 500;    // min pulse width (μs) — check servo d
 const uint16_t SERVO_MAX_US = 2500;   // max pulse width (μs)
 uint16_t openAngle = 0;               // servo angle when cap is OPEN (0-270) *adjustable via ASCOM
 uint16_t closeAngle = 180;            // servo angle when cap is CLOSED (0-270) *adjustable via ASCOM
-const uint16_t MOVE_TIME_PER_270_DEG_MS = 5000; // 270-degree open/close movement time
+const uint16_t MOVE_TIME_MS = 2000;   // time to complete open/close movement
 
 // --- Button Settings ---
 const uint8_t BUTTON_PIN = 5;         // D1 (GPIO5), button to GND, uses internal pullup
@@ -72,9 +71,9 @@ const uint16_t DEBOUNCE_MS = 200;     // debounce time
 const uint8_t LED_PIN = 0;            // D3 (GPIO0), active LOW on most Wemos boards
 // #define LED_ACTIVE_HIGH             // uncomment if your LED is active HIGH
 
-// --- Flat Panel Settings ---
-const uint8_t FLAT_PANEL_PWM_PIN = 14; // D5 (GPIO14), high level enables the MOSFET driver
-const uint16_t FLAT_PANEL_MAX_BRIGHTNESS = 255;
+// --- Flat Panel Light Settings ---
+const uint8_t LIGHT_PIN = 14;        // D5 (GPIO14), PWM output for flat panel LED
+const uint8_t MAX_BRIGHTNESS = 255;  // 0-255 steps
 
 // --- Serial Settings ---
 const uint32_t SERIAL_BAUD = 115200;  // for USB serial control (ASCOM/INDI)
@@ -106,12 +105,10 @@ unsigned long moveStartTime = 0;
 bool isMoving = false;
 bool movingToOpen = false;  // track direction: true=opening, false=closing
 uint16_t targetAngle = 0;
-uint16_t servoCurrentAngle = 0;
-uint16_t movementStartAngle = 0;
-uint16_t movementDurationMs = 0;
 
-// --- Flat Panel ---
-uint16_t flatPanelBrightness = 0;
+// --- Flat Panel Light State ---
+uint8_t lightBrightness = 0;          // current brightness (0-255)
+bool lightOn = false;
 
 // --- Button ---
 unsigned long lastButtonCheck = 0;
@@ -126,28 +123,29 @@ bool serialComplete = false;
 // ==================== SETUP ====================
 
 void setup() {
+  // --- Servo pin: hold LOW IMMEDIATELY to prevent twitch during boot ---
+  digitalWrite(SERVO_PIN, LOW);
+  pinMode(SERVO_PIN, OUTPUT);
+  digitalWrite(SERVO_PIN, LOW);
+
   Serial.begin(SERIAL_BAUD);
   Serial.println();
-  Serial.println(F("ESP8266 Lens Cap Controller v1.1.2"));
+  Serial.println(F("ESP8266 Lens Cap Controller v1.2"));
 
   // --- EEPROM ---
   EEPROM.begin(16);
   loadAnglesFromEEPROM();
 
-  // --- Servo ---
-  capServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
-
-  // Restore last known cover state instead of always closing
+  // --- Servo: attach early so it holds position during WiFi init ---
   uint8_t savedState = EEPROM.read(EEPROM_ADDR_STATE);
-  if (savedState == COVER_OPEN) {
-    targetAngle = openAngle;
-    moveToAngle(openAngle);
-    currentState = COVER_OPEN;
-  } else {
-    targetAngle = closeAngle;
-    moveToAngle(closeAngle);
-    currentState = COVER_CLOSED;
-  }
+  currentState = (savedState == COVER_OPEN) ? COVER_OPEN : COVER_CLOSED;
+  uint16_t initAngle = (currentState == COVER_OPEN) ? openAngle : closeAngle;
+  capServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
+  moveToAngle(initAngle);
+
+  // --- Flat Panel Light ---
+  pinMode(LIGHT_PIN, OUTPUT);
+  digitalWrite(LIGHT_PIN, LOW);
 
   // --- Button ---
   pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -155,12 +153,6 @@ void setup() {
   // --- LED ---
   pinMode(LED_PIN, OUTPUT);
   setLED(false);
-
-  // --- Flat Panel PWM ---
-  pinMode(FLAT_PANEL_PWM_PIN, OUTPUT);
-  analogWriteRange(FLAT_PANEL_MAX_BRIGHTNESS);
-  analogWriteFreq(1000);
-  setFlatPanelBrightness(0);
 
   // --- WiFi ---
 #ifdef WIFI_STA_MODE
@@ -263,7 +255,7 @@ void handleRoot() {
     <button class="btn btn-open" onclick="fetch('/open');updateStatus();" id="btnOpen">📂 开盖</button>
     <button class="btn btn-close" onclick="fetch('/close');updateStatus();" id="btnClose">📁 关盖</button>
     <button class="btn btn-toggle" onclick="fetch('/toggle');updateStatus();">🔄 切换</button>
-    <div class="info">Lens Cap Controller v1.1.2 | ESP8266</div>
+    <div class="info">Lens Cap Controller v1.0 | ESP8266</div>
   </div>
   <script>
     async function getStatus() {
@@ -317,52 +309,21 @@ void handleStatus() {
 
 // ==================== COVER CONTROL ====================
 
-uint16_t calculateMoveDurationMs(uint16_t fromAngle, uint16_t toAngle) {
-  uint16_t distance = abs((int16_t)toAngle - (int16_t)fromAngle);
-  return (uint16_t)((uint32_t)distance * MOVE_TIME_PER_270_DEG_MS / 270);
-}
-
-float easeInOutSine(float progress) {
-  if (progress <= 0.0f) return 0.0f;
-  if (progress >= 1.0f) return 1.0f;
-  return 0.5f - 0.5f * cos(progress * 3.1415926f);
-}
-
 void openCover() {
   if (isMoving) return;
-  movementStartAngle = servoCurrentAngle;
   targetAngle = openAngle;
-
-  if (movementStartAngle == targetAngle) {
-    currentState = COVER_OPEN;
-    EEPROM.write(EEPROM_ADDR_STATE, (uint8_t)currentState);
-    EEPROM.commit();
-    return;
-  }
-
   movingToOpen = true;
   currentState = COVER_MOVING;
   isMoving = true;
-  movementDurationMs = calculateMoveDurationMs(movementStartAngle, targetAngle);
   moveStartTime = millis();
 }
 
 void closeCover() {
   if (isMoving) return;
-  movementStartAngle = servoCurrentAngle;
   targetAngle = closeAngle;
-
-  if (movementStartAngle == targetAngle) {
-    currentState = COVER_CLOSED;
-    EEPROM.write(EEPROM_ADDR_STATE, (uint8_t)currentState);
-    EEPROM.commit();
-    return;
-  }
-
   movingToOpen = false;
   currentState = COVER_MOVING;
   isMoving = true;
-  movementDurationMs = calculateMoveDurationMs(movementStartAngle, targetAngle);
   moveStartTime = millis();
 }
 
@@ -378,7 +339,6 @@ void moveToAngle(uint16_t angle) {
   uint16_t clamped = constrain(angle, 0, 270);
   uint16_t us = map(clamped, 0, 270, SERVO_MIN_US, SERVO_MAX_US);
   capServo.writeMicroseconds(us);
-  servoCurrentAngle = clamped;
 }
 
 // ==================== EEPROM ====================
@@ -496,33 +456,44 @@ void processSerialCommand() {
       Serial.println(">");
       break;
 
-    // ── Calibrator (Flat Panel) ─────────────────────────
-    case 'L':  // Poll calibrator state: 1=Off, 3=Ready
-      Serial.println(flatPanelBrightness > 0 ? F("<3>") : F("<1>"));
+    // ── Calibrator (Flat Panel) ────────────────────────
+    case 'L':  // Poll calibrator state
+      Serial.print("<");
+      Serial.print(lightOn ? 3 : 1);  // 3=Ready, 1=Off
+      Serial.println(">");
       break;
 
     case 'B':  // Query current brightness
       Serial.print("<");
-      Serial.print(flatPanelBrightness);
+      Serial.print(lightBrightness);
       Serial.println(">");
       break;
 
-    case 'M':  // Query maximum brightness
+    case 'M':  // Query max brightness
       Serial.print("<");
-      Serial.print(FLAT_PANEL_MAX_BRIGHTNESS);
+      Serial.print(MAX_BRIGHTNESS);
       Serial.println(">");
       break;
 
-    case 'T':  // Set brightness
+    case 'T':  // Set brightness and turn on
       // Format: T<N>
-      setFlatPanelBrightness(param >= 0 ? param : 0);
+      lightBrightness = constrain(param >= 0 ? param : 0, 0, MAX_BRIGHTNESS);
+      if (lightBrightness > 0) {
+        analogWrite(LIGHT_PIN, lightBrightness);
+        lightOn = true;
+      } else {
+        analogWrite(LIGHT_PIN, 0);
+        lightOn = false;
+      }
       Serial.print("<T");
-      Serial.print(flatPanelBrightness);
+      Serial.print(lightBrightness);
       Serial.println(">");
       break;
 
     case 'F':  // Turn off light
-      setFlatPanelBrightness(0);
+      analogWrite(LIGHT_PIN, 0);
+      lightBrightness = 0;
+      lightOn = false;
       Serial.println(F("<F>"));
       break;
 
@@ -628,7 +599,7 @@ void processSerialCommand() {
         Serial.println(">");
       } else {
         // V alone = version query
-        Serial.println(F("<v1.1.2-esp>"));
+        Serial.println(F("<v1.1.0-esp>"));
       }
       break;
 
@@ -639,9 +610,6 @@ void processSerialCommand() {
     // ── Jog commands (direct servo move, no save) ──────
     case 'J':  // J<N> jog primary servo
       if (param >= 0 && param <= 270) {
-        isMoving = false;
-        targetAngle = param;
-        movementStartAngle = param;
         moveToAngle(param);
         Serial.print("<J");
         Serial.print(param);
@@ -650,8 +618,9 @@ void processSerialCommand() {
       break;
 
     case 'j':  // Query current servo position (approximate)
+      // Return target angle as approximation
       Serial.print("<");
-      Serial.print(servoCurrentAngle);
+      Serial.print(targetAngle);
       Serial.println(">");
       break;
 
@@ -695,7 +664,7 @@ void loop() {
   if (isMoving) {
     unsigned long elapsed = millis() - moveStartTime;
     
-    if (elapsed >= movementDurationMs) {
+    if (elapsed >= MOVE_TIME_MS) {
       // Movement complete
       moveToAngle(targetAngle);
       isMoving = false;
@@ -704,12 +673,11 @@ void loop() {
       EEPROM.write(EEPROM_ADDR_STATE, (uint8_t)currentState);
       EEPROM.commit();
     } else {
-      // Smooth low-acceleration interpolation
-      float progress = (float)elapsed / movementDurationMs;
-      float easedProgress = easeInOutSine(progress);
-      int16_t delta = (int16_t)targetAngle - (int16_t)movementStartAngle;
-      int16_t nextAngle = (int16_t)movementStartAngle + delta * easedProgress;
-      moveToAngle(constrain(nextAngle, 0, 270));
+      // Smooth linear interpolation
+      float progress = (float)elapsed / MOVE_TIME_MS;
+      uint16_t startAngle = movingToOpen ? closeAngle : openAngle;
+      int16_t currentAngle = startAngle + (targetAngle - startAngle) * progress;
+      moveToAngle(constrain(currentAngle, 0, 270));
     }
   }
   
@@ -728,9 +696,4 @@ void loop() {
   
   yield();   // feed ESP8266 watchdog + WiFi stack
   delay(10); // yield to WiFi stack
-}
-
-void setFlatPanelBrightness(int brightness) {
-  flatPanelBrightness = constrain(brightness, 0, FLAT_PANEL_MAX_BRIGHTNESS);
-  analogWrite(FLAT_PANEL_PWM_PIN, flatPanelBrightness);
 }
