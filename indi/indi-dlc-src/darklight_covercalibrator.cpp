@@ -529,7 +529,8 @@ bool DarkLight_CoverCalibrator::initProperties()
                         if (calibratorStateText == "Off")
                         {
                             LOG_INFO("Turning Light ON");
-                            setBrightness(0);
+                            // Restore to max brightness (or last-used value)
+                            setBrightness(MaxBrightnessNP[0].getValue());
                         }
                     }
                     else if (lightDisabled && coverStateText == "Closed")
@@ -538,7 +539,7 @@ bool DarkLight_CoverCalibrator::initProperties()
                         if (calibratorStateText == "Off")
                         {
                             LOG_INFO("Turning Light ON");
-                            setBrightness(0);
+                            setBrightness(MaxBrightnessNP[0].getValue());
                         }
                     }
                     else
@@ -592,12 +593,16 @@ bool DarkLight_CoverCalibrator::initProperties()
             //if light is not disable unless closed then activate light
             if (!lightDisabled)
             {
-                LOGF_DEBUG("Light is not disabled. Setting brightness to %d", static_cast<int>(GoToValueNP[0].getValue()));
-                LOGF_INFO("Setting brightness to %d", static_cast<int>(GoToValueNP[0].getValue()));
-                setBrightness(GoToValueNP[0].getValue());
-
-                TurnLightSP[Light_On].setState(ISS_ON);
-                TurnLightSP[Light_Off].setState(ISS_OFF);
+                double brightness = GoToValueNP[0].getValue();
+                LOGF_INFO("Setting brightness to %d", static_cast<int>(brightness));
+                if (brightness == 0) {
+                    // Brightness 0 = turn off
+                    turnLightOff();
+                } else {
+                    setBrightness(brightness);
+                    TurnLightSP[Light_On].setState(ISS_ON);
+                    TurnLightSP[Light_Off].setState(ISS_OFF);
+                }
                 
                 //set property state back to idle
                 GoToValueNP.setState(IPS_IDLE);
@@ -635,46 +640,39 @@ bool DarkLight_CoverCalibrator::initProperties()
     //incremental change brightness
     AdjustValueSP.onUpdate([this]
     {
-        if (TurnLightSP.findOnSwitchIndex() == Light_On)
+        std::string calState = CalibratorStateTP[0].getText();
+        if (calState == "Not Present") { AdjustValueSP.reset(); AdjustValueSP.setState(IPS_IDLE); AdjustValueSP.apply(); return; }
+
+        int cur = static_cast<int>(CurrentBrightnessNP[0].getValue());
+        double max = MaxBrightnessNP[0].getValue();
+
+        switch (AdjustValueSP.findOnSwitchIndex())
         {
-            switch (AdjustValueSP.findOnSwitchIndex())
-            {
-                case Decrease:
-                    if (CurrentBrightnessNP[0].getValue() - 1 >= 1)
-                    {
-                        LOG_INFO("Decreasing Brightness");
-                        double brightness = CurrentBrightnessNP[0].getValue() - 1;
-                        setBrightness(brightness);
-                    }
-                    else
-                    {
-                        LOG_ERROR("Brightness cannot go below 1");
-                    }
-                    break;
-                case Increase:
-                    if (CurrentBrightnessNP[0].getValue() + 1 <= MaxBrightnessNP[0].getValue())
-                    {
-                        LOG_INFO("Increasing Brightness");
-                        int brightness = CurrentBrightnessNP[0].getValue() + 1;
-                        setBrightness(brightness);
-                    }
-                    else
-                    {
-                        LOG_ERROR("Cannot go above Max Brightness");
-                    }
-                    break;
-            }
-        }
-        else
-        {
-            LOG_WARN("Must turn Light ON");
+            case Decrease:
+                if (cur > 0) {
+                    LOG_INFO("Decreasing Brightness");
+                    setBrightness(cur - 1);
+                } else {
+                    LOG_ERROR("Brightness already at minimum");
+                }
+                break;
+            case Increase:
+                if (cur == 0) {
+                    // Turn on at brightness 1
+                    LOG_INFO("Turning ON at brightness 1");
+                    setBrightness(1);
+                } else if (cur < max) {
+                    LOG_INFO("Increasing Brightness");
+                    setBrightness(cur + 1);
+                } else {
+                    LOG_ERROR("Cannot go above Max Brightness");
+                }
+                break;
         }
 
         //reset switch
         AdjustValueSP.reset();
-        //set property state back to idle
         AdjustValueSP.setState(IPS_IDLE);
-        //inform INDI of the operation
         AdjustValueSP.apply();
     });//end of AdjustValueSP
 
@@ -1113,7 +1111,7 @@ bool DarkLight_CoverCalibrator::updateProperties()
                 MaxBrightnessNP.apply();
 
                 //set GoToBrightness max value
-                GoToValueNP[0].fill("GOTOBRIGHTNESS", "Go To Brightness Value:", "%0.f", 1, MaxBrightnessNP[0].getValue(), 1,
+                GoToValueNP[0].fill("GOTOBRIGHTNESS", "Go To Brightness Value:", "%0.f", 0, MaxBrightnessNP[0].getValue(), 1,
                                     MaxBrightnessNP[0].getValue());
             }
 
@@ -1574,12 +1572,12 @@ void DarkLight_CoverCalibrator::getBrightness()
 
 void DarkLight_CoverCalibrator::setBrightness(double BrightnessValue)
 {
-    //convert double to int
-    if (BrightnessValue == 0)
-    {
-        BrightnessValue = MaxBrightnessNP[0].getValue();
-    }
     int intValue = static_cast<int>(BrightnessValue);
+    if (intValue <= 0) {
+        // Brightness 0 = turn off, not max
+        turnLightOff();
+        return;
+    }
     std::string command = "T";
     command += std::to_string(intValue);  //append value
 
@@ -1592,9 +1590,38 @@ void DarkLight_CoverCalibrator::setBrightness(double BrightnessValue)
     else
     {
         LOGF_DEBUG("SetBrightness response: %s", response);
+        // Immediately update state so +/- buttons see correct value
+        CurrentBrightnessNP[0].setValue(intValue);
+        CurrentBrightnessNP.apply();
+        CalibratorStateTP[0].setText("Ready");
+        CalibratorStateTP.apply();
+        TurnLightSP[Light_On].setState(ISS_ON);
+        TurnLightSP[Light_Off].setState(ISS_OFF);
+        TurnLightSP.apply();
         lightIsReady = false;
     }
 }//end of setBrightness
+
+void DarkLight_CoverCalibrator::turnLightOff()
+{
+    LOG_DEBUG("Turning light OFF");
+    char response[32] = {0};
+    if (sendCommand("F", response))
+    {
+        LOGF_DEBUG("CalibratorOff response: %s", response);
+        CalibratorStateTP[0].setText("Off");
+        CalibratorStateTP.apply();
+        CurrentBrightnessNP[0].setValue(0);
+        CurrentBrightnessNP.apply();
+        TurnLightSP[Light_On].setState(ISS_OFF);
+        TurnLightSP[Light_Off].setState(ISS_ON);
+        TurnLightSP.apply();
+    }
+    else
+    {
+        LOG_WARN("Turn light OFF command failed");
+    }
+}
 
 void DarkLight_CoverCalibrator::setAutoHeatOn()
 {

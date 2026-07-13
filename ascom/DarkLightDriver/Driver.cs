@@ -130,9 +130,6 @@ namespace DarkLight.CoverCalibrator
             if (_coverStatus == CoverStatus.Open || _coverStatus == CoverStatus.Moving)
                 return;
 
-            // Sync angles before opening to ensure we open to the right position
-            SyncAngles();
-
             var resp = _device.SendCommand("O");
             LogMessage("OpenCover", $"device response: {resp}");
 
@@ -152,9 +149,6 @@ namespace DarkLight.CoverCalibrator
 
             if (_coverStatus == CoverStatus.Closed || _coverStatus == CoverStatus.Moving)
                 return;
-
-            // Sync angles before closing
-            SyncAngles();
 
             var resp = _device.SendCommand("C");
             LogMessage("CloseCover", $"device response: {resp}");

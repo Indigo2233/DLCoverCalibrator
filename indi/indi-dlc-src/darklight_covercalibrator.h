@@ -75,6 +75,7 @@ class DarkLight_CoverCalibrator : public INDI::DefaultDevice
         void getCalibratorState();
         void getBrightness();
         void setBrightness(double BrightnessValue);
+        void turnLightOff();
         void setAutoHeatOn();
         void setHeatOnClose();
         void setHeaterState();
