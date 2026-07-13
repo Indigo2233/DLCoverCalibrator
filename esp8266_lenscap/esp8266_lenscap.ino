@@ -3,7 +3,7 @@
   Board:   Wemos D1 Mini / NodeMCU (ESP8266)
   Author:  Generated for DLCoverCalibrator project
   Date:    2025-07-06
-  Version: 1.1.0
+  Version: 1.1.2
 
   Description: WiFi-controlled telescope lens cap using a servo.
                - Built-in web server for phone/browser control
@@ -16,6 +16,7 @@
     - Servo: signal -> D2 (GPIO4), power -> external 5V
     - Button: D1 (GPIO5) -> GND (internal pullup)
     - Optional LED: D3 (GPIO0) -> GND (active LOW on some boards, check your model)
+    - Flat panel MOSFET PWM: D5 (GPIO14) -> driver PWM input
 
   Power: Servo MUST be powered from external 5V, NOT from 3.3V pin.
          When powered via USB, the 5V pin provides USB power (sufficient for SG90).
@@ -71,6 +72,10 @@ const uint16_t DEBOUNCE_MS = 200;     // debounce time
 const uint8_t LED_PIN = 0;            // D3 (GPIO0), active LOW on most Wemos boards
 // #define LED_ACTIVE_HIGH             // uncomment if your LED is active HIGH
 
+// --- Flat Panel Settings ---
+const uint8_t FLAT_PANEL_PWM_PIN = 14; // D5 (GPIO14), high level enables the MOSFET driver
+const uint16_t FLAT_PANEL_MAX_BRIGHTNESS = 255;
+
 // --- Serial Settings ---
 const uint32_t SERIAL_BAUD = 115200;  // for USB serial control (ASCOM/INDI)
 
@@ -105,6 +110,9 @@ uint16_t servoCurrentAngle = 0;
 uint16_t movementStartAngle = 0;
 uint16_t movementDurationMs = 0;
 
+// --- Flat Panel ---
+uint16_t flatPanelBrightness = 0;
+
 // --- Button ---
 unsigned long lastButtonCheck = 0;
 bool lastButtonState = HIGH;
@@ -120,7 +128,7 @@ bool serialComplete = false;
 void setup() {
   Serial.begin(SERIAL_BAUD);
   Serial.println();
-  Serial.println(F("ESP8266 Lens Cap Controller v1.1.1"));
+  Serial.println(F("ESP8266 Lens Cap Controller v1.1.2"));
 
   // --- EEPROM ---
   EEPROM.begin(16);
@@ -147,6 +155,12 @@ void setup() {
   // --- LED ---
   pinMode(LED_PIN, OUTPUT);
   setLED(false);
+
+  // --- Flat Panel PWM ---
+  pinMode(FLAT_PANEL_PWM_PIN, OUTPUT);
+  analogWriteRange(FLAT_PANEL_MAX_BRIGHTNESS);
+  analogWriteFreq(1000);
+  setFlatPanelBrightness(0);
 
   // --- WiFi ---
 #ifdef WIFI_STA_MODE
@@ -249,7 +263,7 @@ void handleRoot() {
     <button class="btn btn-open" onclick="fetch('/open');updateStatus();" id="btnOpen">📂 开盖</button>
     <button class="btn btn-close" onclick="fetch('/close');updateStatus();" id="btnClose">📁 关盖</button>
     <button class="btn btn-toggle" onclick="fetch('/toggle');updateStatus();">🔄 切换</button>
-    <div class="info">Lens Cap Controller v1.1.1 | ESP8266</div>
+    <div class="info">Lens Cap Controller v1.1.2 | ESP8266</div>
   </div>
   <script>
     async function getStatus() {
@@ -482,27 +496,33 @@ void processSerialCommand() {
       Serial.println(">");
       break;
 
-    // ── Calibrator (Flat Panel) — we don't have one, but report "Off" to avoid UI errors ────
-    case 'L':  // Poll calibrator state -> Off (no hardware, but UI expects non-error)
-      Serial.println(F("<1>"));
+    // ── Calibrator (Flat Panel) ─────────────────────────
+    case 'L':  // Poll calibrator state: 1=Off, 3=Ready
+      Serial.println(flatPanelBrightness > 0 ? F("<3>") : F("<1>"));
       break;
 
-    case 'B':  // Query brightness -> always 0
-      Serial.println(F("<0>"));
-      break;
-
-    case 'M':  // Query max brightness -> report 255 (prevents 0/0 display issues)
-      Serial.println(F("<255>"));
-      break;
-
-    case 'T':  // Set brightness (ignore, no hardware)
-      // Format: T<N>
-      Serial.print("<T");
-      Serial.print(param >= 0 ? param : 0);
+    case 'B':  // Query current brightness
+      Serial.print("<");
+      Serial.print(flatPanelBrightness);
       Serial.println(">");
       break;
 
-    case 'F':  // Turn off light (ignore)
+    case 'M':  // Query maximum brightness
+      Serial.print("<");
+      Serial.print(FLAT_PANEL_MAX_BRIGHTNESS);
+      Serial.println(">");
+      break;
+
+    case 'T':  // Set brightness
+      // Format: T<N>
+      setFlatPanelBrightness(param >= 0 ? param : 0);
+      Serial.print("<T");
+      Serial.print(flatPanelBrightness);
+      Serial.println(">");
+      break;
+
+    case 'F':  // Turn off light
+      setFlatPanelBrightness(0);
       Serial.println(F("<F>"));
       break;
 
@@ -608,7 +628,7 @@ void processSerialCommand() {
         Serial.println(">");
       } else {
         // V alone = version query
-        Serial.println(F("<v1.1.1-esp>"));
+        Serial.println(F("<v1.1.2-esp>"));
       }
       break;
 
@@ -708,4 +728,9 @@ void loop() {
   
   yield();   // feed ESP8266 watchdog + WiFi stack
   delay(10); // yield to WiFi stack
+}
+
+void setFlatPanelBrightness(int brightness) {
+  flatPanelBrightness = constrain(brightness, 0, FLAT_PANEL_MAX_BRIGHTNESS);
+  analogWrite(FLAT_PANEL_PWM_PIN, flatPanelBrightness);
 }
