@@ -74,6 +74,7 @@ const uint8_t LED_PIN = 0;            // D3 (GPIO0), active LOW on most Wemos bo
 // --- Flat Panel Light Settings ---
 const uint8_t LIGHT_PIN = 14;        // D5 (GPIO14), PWM output for flat panel LED
 const uint8_t MAX_BRIGHTNESS = 255;  // 0-255 steps
+const uint32_t LIGHT_PWM_FREQ = 4000; // 4kHz PWM
 
 // --- Serial Settings ---
 const uint32_t SERIAL_BAUD = 115200;  // for USB serial control (ASCOM/INDI)
@@ -145,7 +146,8 @@ void setup() {
 
   // --- Flat Panel Light ---
   pinMode(LIGHT_PIN, OUTPUT);
-  digitalWrite(LIGHT_PIN, LOW);
+  analogWrite(LIGHT_PIN, 0);        // init channel
+  analogWriteFreq(LIGHT_PWM_FREQ);  // 4kHz
 
   // --- Button ---
   pinMode(BUTTON_PIN, INPUT_PULLUP);
