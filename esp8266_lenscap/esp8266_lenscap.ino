@@ -61,7 +61,8 @@ const uint16_t SERVO_MIN_US = 500;    // min pulse width (μs) — check servo d
 const uint16_t SERVO_MAX_US = 2500;   // max pulse width (μs)
 uint16_t openAngle = 0;               // servo angle when cap is OPEN (0-270) *adjustable via ASCOM
 uint16_t closeAngle = 180;            // servo angle when cap is CLOSED (0-270) *adjustable via ASCOM
-const uint16_t MOVE_TIME_MS = 2000;   // time to complete open/close movement
+const uint16_t MOVE_TIME_MS = 10000;  // time to complete open/close movement (10s)
+const uint16_t JOG_TIME_MS = 10000;    // time for jog movement (same as open/close)
 
 // --- Button Settings ---
 const uint8_t BUTTON_PIN = 5;         // D1 (GPIO5), button to GND, uses internal pullup
@@ -107,6 +108,12 @@ bool isMoving = false;
 bool movingToOpen = false;  // track direction: true=opening, false=closing
 uint16_t targetAngle = 0;
 
+// --- Jog state (smooth temporary move) ---
+bool jogActive = false;
+uint16_t jogStartAngle = 0;
+uint16_t jogTargetAngle = 0;
+unsigned long jogStartTime = 0;
+
 // --- Flat Panel Light State ---
 uint8_t lightBrightness = 0;          // current brightness (0-255)
 bool lightOn = false;
@@ -137,12 +144,12 @@ void setup() {
   EEPROM.begin(16);
   loadAnglesFromEEPROM();
 
-  // --- Servo: attach early so it holds position during WiFi init ---
+  // Read saved state early (needed for initAngle) but DON'T attach servo yet.
+  // GPIO4 stays OUTPUT LOW during WiFi init to prevent boot twitch.
   uint8_t savedState = EEPROM.read(EEPROM_ADDR_STATE);
   currentState = (savedState == COVER_OPEN) ? COVER_OPEN : COVER_CLOSED;
   uint16_t initAngle = (currentState == COVER_OPEN) ? openAngle : closeAngle;
-  capServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
-  moveToAngle(initAngle);
+  targetAngle = initAngle;  // track the known position
 
   // --- Flat Panel Light ---
   pinMode(LIGHT_PIN, OUTPUT);
@@ -183,6 +190,10 @@ void setup() {
   setupWebServer();
   server.begin();
   Serial.println(F("Web server started."));
+
+  // --- Servo: attach AFTER WiFi init to avoid boot twitch ---
+  capServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
+  moveToAngle(initAngle);
   Serial.println(F("Ready."));
 }
 
@@ -341,6 +352,15 @@ void moveToAngle(uint16_t angle) {
   uint16_t clamped = constrain(angle, 0, 270);
   uint16_t us = map(clamped, 0, 270, SERVO_MIN_US, SERVO_MAX_US);
   capServo.writeMicroseconds(us);
+}
+
+// Smooth jog to angle (does not change cover state)
+void startJog(uint16_t angle) {
+  jogStartAngle = targetAngle;
+  jogTargetAngle = constrain(angle, 0, 270);
+  jogStartTime = millis();
+  jogActive = true;
+  // Don't change isMoving or currentState — jog is temporary
 }
 
 // ==================== EEPROM ====================
@@ -609,21 +629,31 @@ void processSerialCommand() {
       Serial.println(F("<?>"));
       break;
 
-    // ── Jog commands (direct servo move, no save) ──────
-    case 'J':  // J<N> jog primary servo
+    // ── Jog commands (smooth servo move, no save) ──────
+    case 'J':  // J<N> jog primary servo (smooth)
       if (param >= 0 && param <= 270) {
-        moveToAngle(param);
+        startJog(param);
         Serial.print("<J");
         Serial.print(param);
         Serial.println(">");
       }
       break;
 
-    case 'j':  // Query current servo position (approximate)
-      // Return target angle as approximation
-      Serial.print("<");
-      Serial.print(targetAngle);
-      Serial.println(">");
+    case 'j':  // Query current servo position
+      // During jog, return the jog target; otherwise return tracked angle
+      if (jogActive) {
+        // Linear interpolation during jog for accuracy
+        float jogProgress = (float)(millis() - jogStartTime) / JOG_TIME_MS;
+        if (jogProgress >= 1.0f) jogProgress = 1.0f;
+        int16_t pos = jogStartAngle + (jogTargetAngle - jogStartAngle) * jogProgress;
+        Serial.print("<");
+        Serial.print(constrain(pos, 0, 270));
+        Serial.println(">");
+      } else {
+        Serial.print("<");
+        Serial.print(targetAngle);
+        Serial.println(">");
+      }
       break;
 
     case 'K':  // K<N> jog secondary (not installed, return ?)
@@ -662,7 +692,7 @@ void loop() {
   checkButton();
   checkSerial();
   
-  // --- Handle movement ---
+  // --- Handle open/close movement ---
   if (isMoving) {
     unsigned long elapsed = millis() - moveStartTime;
     
@@ -679,6 +709,20 @@ void loop() {
       float progress = (float)elapsed / MOVE_TIME_MS;
       uint16_t startAngle = movingToOpen ? closeAngle : openAngle;
       int16_t currentAngle = startAngle + (targetAngle - startAngle) * progress;
+      moveToAngle(constrain(currentAngle, 0, 270));
+    }
+  }
+
+  // --- Handle jog movement (smooth, no state change) ---
+  if (jogActive) {
+    unsigned long elapsed = millis() - jogStartTime;
+    if (elapsed >= JOG_TIME_MS) {
+      moveToAngle(jogTargetAngle);
+      targetAngle = jogTargetAngle;
+      jogActive = false;
+    } else {
+      float progress = (float)elapsed / JOG_TIME_MS;
+      int16_t currentAngle = jogStartAngle + (jogTargetAngle - jogStartAngle) * progress;
       moveToAngle(constrain(currentAngle, 0, 270));
     }
   }
