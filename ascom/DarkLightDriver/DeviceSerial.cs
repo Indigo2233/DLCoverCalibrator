@@ -1,16 +1,26 @@
 ﻿using System;
 using System.IO.Ports;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
 namespace DarkLight.CoverCalibrator
 {
+    public interface IDeviceConnection : IDisposable
+    {
+        bool IsOpen { get; }
+        void Open(string endpoint, int parameter);
+        void Close();
+        string SendCommand(string command);
+        bool Handshake();
+    }
+
     /// <summary>
     /// Manages serial communication with the DLC firmware.
     /// Protocol: commands are wrapped in &lt; &gt; delimiters.
     /// Example: &lt;O&gt; for open, &lt;P&gt; for poll cover state.
     /// </summary>
-    public class DeviceSerial : IDisposable
+    public class DeviceSerial : IDeviceConnection
     {
         private SerialPort _serialPort;
         private readonly object _lock = new object();
@@ -152,6 +162,123 @@ namespace DarkLight.CoverCalibrator
         {
             var response = SendCommand("Z");
             return response != null && response == "?";
+        }
+
+        public void Dispose()
+        {
+            Close();
+        }
+    }
+
+    /// <summary>
+    /// Manages TCP communication with the ESP8266 DLC firmware.
+    /// Uses the same &lt;command&gt;/&lt;response&gt; framing as USB serial.
+    /// </summary>
+    public class DeviceTcp : IDeviceConnection
+    {
+        private TcpClient _client;
+        private NetworkStream _stream;
+        private readonly object _lock = new object();
+        private const int ReadTimeoutMs = 5000;
+        private const int WriteTimeoutMs = 2000;
+        private const int ConnectTimeoutMs = 5000;
+        private const int MaxRetries = 3;
+
+        public bool IsOpen => _client != null && _client.Connected && _stream != null;
+
+        public void Open(string host, int port)
+        {
+            lock (_lock)
+            {
+                Close();
+                _client = new TcpClient { NoDelay = true };
+                var result = _client.BeginConnect(host, port, null, null);
+                try
+                {
+                    if (!result.AsyncWaitHandle.WaitOne(ConnectTimeoutMs))
+                        throw new TimeoutException($"Timed out connecting to {host}:{port}.");
+                    _client.EndConnect(result);
+                }
+                finally
+                {
+                    result.AsyncWaitHandle.Close();
+                }
+
+                _stream = _client.GetStream();
+                _stream.ReadTimeout = ReadTimeoutMs;
+                _stream.WriteTimeout = WriteTimeoutMs;
+            }
+        }
+
+        public void Close()
+        {
+            lock (_lock)
+            {
+                try { _stream?.Close(); } catch { }
+                try { _client?.Close(); } catch { }
+                _stream = null;
+                _client = null;
+            }
+        }
+
+        public string SendCommand(string command)
+        {
+            lock (_lock)
+            {
+                if (!IsOpen) return null;
+                byte[] payload = Encoding.ASCII.GetBytes($"<{command}>");
+
+                for (int retry = 0; retry < MaxRetries; retry++)
+                {
+                    try
+                    {
+                        while (_stream.DataAvailable) _stream.ReadByte();
+                        _stream.Write(payload, 0, payload.Length);
+                        _stream.Flush();
+                        var response = ReadResponse();
+                        if (response != null) return response;
+                    }
+                    catch (Exception) when (retry < MaxRetries - 1)
+                    {
+                        Thread.Sleep(200);
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }
+                return null;
+            }
+        }
+
+        private string ReadResponse()
+        {
+            var response = new StringBuilder();
+            bool inResponse = false;
+            while (true)
+            {
+                int value = _stream.ReadByte();
+                if (value < 0) return null;
+                char c = (char)value;
+                if (c == '<')
+                {
+                    inResponse = true;
+                    response.Clear();
+                }
+                else if (c == '>' && inResponse)
+                {
+                    return response.ToString();
+                }
+                else if (inResponse)
+                {
+                    response.Append(c);
+                }
+            }
+        }
+
+        public bool Handshake()
+        {
+            return SendCommand("Z") == "?";
         }
 
         public void Dispose()

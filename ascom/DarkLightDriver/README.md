@@ -1,5 +1,12 @@
 # DarkLight Cover Calibrator — Custom ASCOM Driver
 
+## 1.1.0 连接方式
+
+- `Serial`：Arduino Nano 或 ESP8266 USB 串口，默认 115200 baud
+- `TCP`：ESP8266 的 STA/AP 地址，默认端口 `4030`
+
+两种传输使用相同的 DLC `<命令>` 协议。TCP 模式下建议在路由器为设备保留固定 DHCP 地址。
+
 这是一个从头编写的 ASCOM CoverCalibrator V2 驱动，支持直接配置舵机开合角度。
 
 ## 与原版驱动的区别

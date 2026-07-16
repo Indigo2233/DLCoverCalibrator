@@ -74,7 +74,7 @@ if exist "!REGASM64!" (
 )
 
 reg add "!UNINSTALL_KEY!" /v "DisplayName" /t REG_SZ /d "!APP_NAME!" /f >nul
-reg add "!UNINSTALL_KEY!" /v "DisplayVersion" /t REG_SZ /d "1.0.1" /f >nul
+reg add "!UNINSTALL_KEY!" /v "DisplayVersion" /t REG_SZ /d "1.1.0" /f >nul
 reg add "!UNINSTALL_KEY!" /v "Publisher" /t REG_SZ /d "DarkLight Cover Calibrator" /f >nul
 reg add "!UNINSTALL_KEY!" /v "InstallLocation" /t REG_SZ /d "!INSTALLDIR!" /f >nul
 reg add "!UNINSTALL_KEY!" /v "UninstallString" /t REG_SZ /d "\"!INSTALLDIR!\uninstall.cmd\"" /f >nul
