@@ -13,7 +13,7 @@ namespace DarkLight.CoverCalibrator
 {
     /// <summary>
     /// ASCOM CoverCalibrator V2 driver for DarkLight Cover Calibrator (DLC).
-    /// Communicates with the DLC Arduino firmware via serial port.
+    /// Communicates with DLC firmware via USB serial or ESP8266 TCP port 4030.
     /// Supports configurable servo open/close angles.
     /// </summary>
     [Guid("D1E2F3A4-B5C6-4789-A0B1-C2D3E4F5A6B7")]
@@ -27,11 +27,11 @@ namespace DarkLight.CoverCalibrator
         private const string DriverId = "DarkLight.CoverCalibrator";
         private const string DriverName = "DarkLight Cover Calibrator";
         private const string DriverDescription = "ASCOM driver for the DIY DarkLight Cover Calibrator";
-        private const string DriverVersionString = "1.0.1";
+        private const string DriverVersionString = "1.1.0";
         public const int MaxServoAngle = 270;
 
         // ── Internal state ─────────────────────────────────────────
-        private DeviceSerial _device;
+        private IDeviceConnection _device;
         private Timer _pollTimer;
         private bool _connected;
         private CoverStatus _coverStatus = CoverStatus.Unknown;
@@ -47,6 +47,9 @@ namespace DarkLight.CoverCalibrator
         private int? _secondaryCurrentPosition;
         private string _portName = "COM3";
         private int _baudRate = 115200;
+        private string _transport = "Serial";
+        private string _tcpHost = "192.168.4.1";
+        private int _tcpPort = 4030;
         private int _pollIntervalMs = 1000;
         private bool _disposed;
         private bool _connecting;
@@ -54,6 +57,9 @@ namespace DarkLight.CoverCalibrator
         // ── ASCOM profile keys ─────────────────────────────────────
         private const string ProfilePortName = "PortName";
         private const string ProfileBaudRate = "BaudRate";
+        private const string ProfileTransport = "Transport";
+        private const string ProfileTcpHost = "TcpHost";
+        private const string ProfileTcpPort = "TcpPort";
         private const string ProfilePollInterval = "PollIntervalMs";
         private const string ProfilePrimaryOpenAngle = "PrimaryOpenAngle";
         private const string ProfilePrimaryCloseAngle = "PrimaryCloseAngle";
@@ -67,12 +73,12 @@ namespace DarkLight.CoverCalibrator
         // ── Constructor ────────────────────────────────────────────
         public Driver()
         {
-            _device = new DeviceSerial();
             _tl = new TraceLogger("", TraceName)
             {
                 Enabled = true
             };
             ReadProfile();
+            _device = CreateDeviceConnection();
             LogMessage("Driver", "Constructor complete");
         }
 
@@ -354,14 +360,18 @@ namespace DarkLight.CoverCalibrator
             _connecting = true;
             try
             {
-            LogMessage("Connect", $"Opening {_portName} @ {_baudRate}");
-            _device.Open(_portName, _baudRate);
+            _device?.Dispose();
+            _device = CreateDeviceConnection();
+            string endpoint = IsTcpTransport ? _tcpHost : _portName;
+            int parameter = IsTcpTransport ? _tcpPort : _baudRate;
+            LogMessage("Connect", $"Opening {_transport} {endpoint}:{parameter}");
+            _device.Open(endpoint, parameter);
 
             // Handshake
             if (!_device.Handshake())
             {
                 _device.Close();
-                throw new ASCOM.NotConnectedException("Failed handshake with DLC device. Check port, baud rate, and firmware.");
+                throw new ASCOM.NotConnectedException("Failed handshake with DLC device. Check transport settings and firmware.");
             }
             LogMessage("Connect", "Handshake successful");
 
@@ -691,6 +701,35 @@ namespace DarkLight.CoverCalibrator
             set { _baudRate = value; WriteProfile(); }
         }
 
+        public string Transport
+        {
+            get => _transport;
+            set
+            {
+                _transport = string.Equals(value, "TCP", StringComparison.OrdinalIgnoreCase) ? "TCP" : "Serial";
+                WriteProfile();
+            }
+        }
+
+        public string TcpHost
+        {
+            get => _tcpHost;
+            set { _tcpHost = string.IsNullOrWhiteSpace(value) ? "192.168.4.1" : value.Trim(); WriteProfile(); }
+        }
+
+        public int TcpPort
+        {
+            get => _tcpPort;
+            set { _tcpPort = value > 0 && value <= 65535 ? value : 4030; WriteProfile(); }
+        }
+
+        private bool IsTcpTransport => string.Equals(_transport, "TCP", StringComparison.OrdinalIgnoreCase);
+
+        private IDeviceConnection CreateDeviceConnection()
+        {
+            return IsTcpTransport ? (IDeviceConnection)new DeviceTcp() : new DeviceSerial();
+        }
+
         public int PollIntervalMs
         {
             get => _pollIntervalMs;
@@ -708,13 +747,16 @@ namespace DarkLight.CoverCalibrator
                 profile.DeviceType = "CoverCalibrator";
                 _portName = profile.GetValue(DriverId, ProfilePortName, string.Empty, "COM3");
                 _baudRate = Convert.ToInt32(profile.GetValue(DriverId, ProfileBaudRate, string.Empty, "115200"), CultureInfo.InvariantCulture);
+                _transport = profile.GetValue(DriverId, ProfileTransport, string.Empty, "Serial");
+                _tcpHost = profile.GetValue(DriverId, ProfileTcpHost, string.Empty, "192.168.4.1");
+                _tcpPort = Convert.ToInt32(profile.GetValue(DriverId, ProfileTcpPort, string.Empty, "4030"), CultureInfo.InvariantCulture);
                 _pollIntervalMs = Convert.ToInt32(profile.GetValue(DriverId, ProfilePollInterval, string.Empty, "1000"), CultureInfo.InvariantCulture);
                 _primaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfilePrimaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
                 _primaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfilePrimaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
                 _secondaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfileSecondaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
                 _secondaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfileSecondaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
             }
-            LogMessage("ReadProfile", $"Port={_portName} Baud={_baudRate} PO={_primaryOpenAngle} PC={_primaryCloseAngle}");
+            LogMessage("ReadProfile", $"Transport={_transport} Serial={_portName}@{_baudRate} TCP={_tcpHost}:{_tcpPort} PO={_primaryOpenAngle} PC={_primaryCloseAngle}");
         }
 
         public void WriteProfile()
@@ -724,6 +766,9 @@ namespace DarkLight.CoverCalibrator
                 profile.DeviceType = "CoverCalibrator";
                 profile.WriteValue(DriverId, ProfilePortName, _portName);
                 profile.WriteValue(DriverId, ProfileBaudRate, _baudRate.ToString(CultureInfo.InvariantCulture));
+                profile.WriteValue(DriverId, ProfileTransport, _transport);
+                profile.WriteValue(DriverId, ProfileTcpHost, _tcpHost);
+                profile.WriteValue(DriverId, ProfileTcpPort, _tcpPort.ToString(CultureInfo.InvariantCulture));
                 profile.WriteValue(DriverId, ProfilePollInterval, _pollIntervalMs.ToString(CultureInfo.InvariantCulture));
                 profile.WriteValue(DriverId, ProfilePrimaryOpenAngle, _primaryOpenAngle.ToString(CultureInfo.InvariantCulture));
                 profile.WriteValue(DriverId, ProfilePrimaryCloseAngle, _primaryCloseAngle.ToString(CultureInfo.InvariantCulture));

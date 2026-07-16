@@ -12,6 +12,12 @@ namespace DarkLight.CoverCalibrator
 
         private ComboBox _cmbPort;
         private ComboBox _cmbBaud;
+        private ComboBox _cmbTransport;
+        private TextBox _txtTcpHost;
+        private TextBox _txtTcpPort;
+        private Label _lblEndpoint;
+        private Label _lblParameter;
+        private Button _btnRefreshPorts;
         private Button _btnConnect;
         private Label _lblFirmware;
         private Label _lblConnected;
@@ -72,24 +78,44 @@ namespace DarkLight.CoverCalibrator
             };
             Controls.Add(pnlSerial);
 
-            pnlSerial.Controls.Add(MakeLabel("COM:", 10, 8, 40, 22, TextColor));
+            pnlSerial.Controls.Add(MakeLabel("连接:", 10, 8, 42, 22, TextColor));
+            _cmbTransport = new ComboBox
+            {
+                Location = new Point(52, 8), Width = 78,
+                DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat,
+                BackColor = BtnBg, ForeColor = TextColor
+            };
+            _cmbTransport.Items.AddRange(new object[] { "Serial", "TCP" });
+            _cmbTransport.SelectedIndexChanged += (s, e) => UpdateTransportControls();
+            pnlSerial.Controls.Add(_cmbTransport);
+
+            _lblEndpoint = MakeLabel("COM:", 138, 8, 42, 22, TextColor);
+            pnlSerial.Controls.Add(_lblEndpoint);
             _cmbPort = new ComboBox
             {
-                Location = new Point(52, 8), Width = 88,
+                Location = new Point(180, 8), Width = 82,
                 DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat,
                 BackColor = BtnBg, ForeColor = TextColor,
                 Font = new Font("Microsoft YaHei UI", 9.5F)
             };
             pnlSerial.Controls.Add(_cmbPort);
 
-            var btnRefresh = MakeButton("\u21bb", 144, 7, 30, 24);
-            btnRefresh.Click += (s, e) => RefreshPorts();
-            pnlSerial.Controls.Add(btnRefresh);
+            _txtTcpHost = new TextBox
+            {
+                Location = new Point(180, 8), Width = 116,
+                BackColor = BtnBg, ForeColor = TextColor, BorderStyle = BorderStyle.FixedSingle
+            };
+            pnlSerial.Controls.Add(_txtTcpHost);
 
-            pnlSerial.Controls.Add(MakeLabel("Baud:", 184, 8, 40, 22, TextColor));
+            _btnRefreshPorts = MakeButton("\u21bb", 266, 7, 30, 24);
+            _btnRefreshPorts.Click += (s, e) => RefreshPorts();
+            pnlSerial.Controls.Add(_btnRefreshPorts);
+
+            _lblParameter = MakeLabel("Baud:", 304, 8, 42, 22, TextColor);
+            pnlSerial.Controls.Add(_lblParameter);
             _cmbBaud = new ComboBox
             {
-                Location = new Point(226, 8), Width = 76,
+                Location = new Point(346, 8), Width = 76,
                 DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat,
                 BackColor = BtnBg, ForeColor = TextColor,
                 Font = new Font("Microsoft YaHei UI", 9.5F)
@@ -97,16 +123,23 @@ namespace DarkLight.CoverCalibrator
             _cmbBaud.Items.AddRange(new object[] { "9600", "19200", "38400", "57600", "115200", "230400" });
             pnlSerial.Controls.Add(_cmbBaud);
 
-            _btnConnect = MakeButton("\u8fde\u63a5", 314, 6, 80, 26);
+            _txtTcpPort = new TextBox
+            {
+                Location = new Point(346, 8), Width = 76,
+                BackColor = BtnBg, ForeColor = TextColor, BorderStyle = BorderStyle.FixedSingle
+            };
+            pnlSerial.Controls.Add(_txtTcpPort);
+
+            _btnConnect = MakeButton("\u8fde\u63a5", 432, 6, 72, 26);
             _btnConnect.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
             _btnConnect.Click += BtnConnect_Click;
             pnlSerial.Controls.Add(_btnConnect);
 
-            _lblConnected = MakeLabel("", 406, 8, 110, 22, MutedTextColor);
+            _lblConnected = MakeLabel("", 512, 8, 100, 22, MutedTextColor);
             _lblConnected.Font = new Font("Microsoft YaHei UI", 9.5F);
             pnlSerial.Controls.Add(_lblConnected);
 
-            _lblFirmware = MakeLabel("", 526, 8, 180, 22, MutedTextColor);
+            _lblFirmware = MakeLabel("", 610, 8, 96, 22, MutedTextColor);
             _lblFirmware.Font = new Font("Microsoft YaHei UI", 9F);
             _lblFirmware.TextAlign = ContentAlignment.MiddleRight;
             pnlSerial.Controls.Add(_lblFirmware);
@@ -307,7 +340,33 @@ namespace DarkLight.CoverCalibrator
 
         private void LoadValues()
         {
+            _cmbTransport.SelectedItem = _driver.Transport;
+            if (_cmbTransport.SelectedIndex < 0) _cmbTransport.SelectedIndex = 0;
             _cmbBaud.Text = _driver.BaudRate.ToString();
+            _txtTcpHost.Text = _driver.TcpHost;
+            _txtTcpPort.Text = _driver.TcpPort.ToString();
+            UpdateTransportControls();
+        }
+
+        private void UpdateTransportControls()
+        {
+            bool tcp = string.Equals(_cmbTransport.SelectedItem?.ToString(), "TCP", StringComparison.OrdinalIgnoreCase);
+            _lblEndpoint.Text = tcp ? "主机:" : "COM:";
+            _lblParameter.Text = tcp ? "端口:" : "Baud:";
+            _cmbPort.Visible = !tcp;
+            _btnRefreshPorts.Visible = !tcp;
+            _cmbBaud.Visible = !tcp;
+            _txtTcpHost.Visible = tcp;
+            _txtTcpPort.Visible = tcp;
+        }
+
+        private void SaveConnectionSettings()
+        {
+            _driver.Transport = _cmbTransport.SelectedItem?.ToString() ?? "Serial";
+            _driver.PortName = _cmbPort.SelectedItem?.ToString() ?? _driver.PortName;
+            _driver.BaudRate = int.TryParse(_cmbBaud.Text, out int baud) ? baud : 115200;
+            _driver.TcpHost = string.IsNullOrWhiteSpace(_txtTcpHost.Text) ? "192.168.4.1" : _txtTcpHost.Text.Trim();
+            _driver.TcpPort = int.TryParse(_txtTcpPort.Text, out int tcpPort) ? tcpPort : 4030;
         }
 
         private void RefreshPorts()
@@ -409,8 +468,7 @@ namespace DarkLight.CoverCalibrator
                 }
                 else
                 {
-                    _driver.PortName = _cmbPort.SelectedItem?.ToString() ?? _driver.PortName;
-                    _driver.BaudRate = int.TryParse(_cmbBaud.Text, out int baud) ? baud : 115200;
+                    SaveConnectionSettings();
                     _driver.Connected = true;
                 }
 
@@ -510,8 +568,7 @@ namespace DarkLight.CoverCalibrator
 
         private void BtnDone_Click(object sender, EventArgs e)
         {
-            _driver.PortName = _cmbPort.SelectedItem?.ToString() ?? _driver.PortName;
-            _driver.BaudRate = int.TryParse(_cmbBaud.Text, out int baud) ? baud : 115200;
+            SaveConnectionSettings();
             DialogResult = DialogResult.OK;
         }
 
@@ -519,7 +576,7 @@ namespace DarkLight.CoverCalibrator
         {
             if (_driver.Connected) return true;
             MessageBox.Show(
-                "\u8bf7\u5148\u5728\u9876\u90e8\u9009\u62e9 COM \u7aef\u53e3\u5e76\u70b9\u51fb\u8fde\u63a5\u3002",
+                "\u8bf7\u5148\u5728\u9876\u90e8\u9009\u62e9 Serial \u6216 TCP \u5e76\u70b9\u51fb\u8fde\u63a5\u3002",
                 "\u672a\u8fde\u63a5", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
         }

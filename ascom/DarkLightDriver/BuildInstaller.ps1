@@ -88,6 +88,7 @@ DarkLight Cover Calibrator ASCOM Driver Manual Install
 1. Extract this ZIP to a local folder.
 2. Right-click install.cmd and choose Run as administrator.
 3. Open ASCOM Chooser and select DarkLight Cover Calibrator.
+4. Choose Serial for Arduino/USB, or TCP for ESP8266 WiFi (port 4030).
 
 If company security software blocks registration, ask IT to run install.cmd
 with local administrator privileges. The script uses RegAsm to register the

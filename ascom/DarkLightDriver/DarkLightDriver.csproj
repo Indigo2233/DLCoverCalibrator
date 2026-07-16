@@ -8,7 +8,7 @@
     <AssemblyName>DarkLight.CoverCalibrator</AssemblyName>
     <RootNamespace>DarkLight.CoverCalibrator</RootNamespace>
     <Description>DarkLight Cover Calibrator ASCOM Driver</Description>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <LangVersion>8.0</LangVersion>
     <ASCOM_COMPONENT_PATH Condition="'$(ASCOM_ROOT)' != ''">$(ASCOM_ROOT)</ASCOM_COMPONENT_PATH>
     <ASCOM_COMPONENT_PATH Condition="'$(ASCOM_COMPONENT_PATH)' == ''">C:\Program Files (x86)\ASCOM\Developer\Components\Platform</ASCOM_COMPONENT_PATH>
