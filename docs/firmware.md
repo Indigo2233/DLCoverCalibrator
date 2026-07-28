@@ -2,6 +2,36 @@
 
 固件文件：`dlc_firmware/dlc_firmware.ino`
 
+## 当前 DLC 板烧录信息
+
+当前通过 CH340 串口连接的 DLC 板实际使用 **ATmega328PB**。应通过
+[MiniCore](https://github.com/MCUdude/MiniCore) 编译和上传；Arduino Nano 的
+`arduino:avr:nano` 配置无法与该板的 bootloader 正常握手。
+
+- 开发板索引：`https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json`
+- MiniCore 版本：`3.1.2`
+- 开发板 FQBN：`MiniCore:avr:328:variant=modelPB`
+- 默认配置：外部 16 MHz、UART0 bootloader、保留 EEPROM
+- 当前 Windows 串口：`COM3`（端口号可能随 USB 接口变化）
+- 固件串口速率：`115200`
+
+安装 MiniCore：
+
+```powershell
+arduino-cli core update-index --additional-urls "https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json"
+arduino-cli core install MiniCore:avr --additional-urls "https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json"
+```
+
+编译并烧录：
+
+```powershell
+arduino-cli compile --fqbn MiniCore:avr:328:variant=modelPB --libraries dlc_firmware/DLC_Library dlc_firmware
+arduino-cli upload -p COM3 --fqbn MiniCore:avr:328:variant=modelPB dlc_firmware
+```
+
+烧录完成后，可通过串口发送 `<V>` 验证固件响应。2026-07-27 的烧录结果为
+`<v1.2.0>`。
+
 ## 配置选项一览
 
 固件顶部 **User-Adjustable Options (UA)** 区域可以调整所有参数：
