@@ -3,7 +3,7 @@
   Board:   Wemos D1 Mini / NodeMCU (ESP8266)
   Author:  Generated for DLCoverCalibrator project
   Date:    2025-07-06
-  Version: 1.2.0
+  Version: 1.2.2
 
   Description: WiFi-controlled telescope lens cap using a servo.
                - Built-in web server for phone/browser control
@@ -57,6 +57,7 @@ uint16_t openAngle = 0;               // servo angle when cap is OPEN (0-270) *a
 uint16_t closeAngle = 180;            // servo angle when cap is CLOSED (0-270) *adjustable via ASCOM
 const uint16_t MOVE_TIME_MS = 10000;  // time to complete open/close movement (10s)
 const uint16_t JOG_TIME_PER_270_DEG_MS = 10000;  // 10s for a full 270-degree jog
+const uint16_t MIN_JOG_DURATION_MS = 750;  // keep small calibration moves visibly smooth
 const uint16_t SERVO_UPDATE_INTERVAL_MS = 20;    // update pulse target at 50Hz
 
 // --- Button Settings ---
@@ -97,6 +98,7 @@ const uint16_t TCP_PORT = 4030;       // WiFi ASCOM/INDI control
 
 // --- Global State ---
 Servo capServo;
+bool servoAttached = false;
 ESP8266WebServer server(80);
 WiFiServer tcpServer(TCP_PORT);
 WiFiClient tcpClient;
@@ -149,6 +151,9 @@ char staPassword[WIFI_PASS_MAX_LEN + 1] = {0};
 bool restartPending = false;
 unsigned long restartAt = 0;
 
+uint16_t angleToPulse(uint16_t angle);
+void attachServoAtLogicalPosition();
+
 // ==================== SETUP ====================
 
 void setup() {
@@ -159,7 +164,7 @@ void setup() {
 
   Serial.begin(SERIAL_BAUD);
   Serial.println();
-  Serial.println(F("ESP8266 Lens Cap Controller v1.2"));
+  Serial.println(F("ESP8266 Lens Cap Controller v1.2.2"));
 
   snprintf(deviceId, sizeof(deviceId), "%06X", ESP.getChipId());
   snprintf(apSSID, sizeof(apSSID), "LensCap-%s", deviceId);
@@ -175,6 +180,9 @@ void setup() {
   currentState = (savedState == COVER_OPEN) ? COVER_OPEN : COVER_CLOSED;
   uint16_t initAngle = (currentState == COVER_OPEN) ? openAngle : closeAngle;
   targetAngle = initAngle;  // track the known position
+  currentServoAngle = initAngle;
+  currentServoPulseUs = angleToPulse(initAngle);
+  movementStartPulseUs = currentServoPulseUs;
 
   // --- Flat Panel Light ---
   pinMode(LIGHT_PIN, OUTPUT);
@@ -200,9 +208,10 @@ void setup() {
   Serial.print(F("DLC TCP server started on port "));
   Serial.println(TCP_PORT);
 
-  // --- Servo: attach AFTER WiFi init to avoid boot twitch ---
-  capServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
-  moveToAngle(initAngle);
+  // Keep the servo output disabled at startup. Opening a USB serial connection
+  // can reset the ESP8266; attaching a servo during that reset can create an
+  // immediate high-current position jump. The first movement command attaches
+  // at the EEPROM-backed logical position and then uses the normal 10 s ramp.
   Serial.println(F("Ready."));
 }
 
@@ -514,7 +523,10 @@ void handleCalibrationJog() {
     return;
   }
 
-  startJog((uint16_t)angle);
+  if (!startJog((uint16_t)angle)) {
+    server.send(409, "text/plain; charset=utf-8", "盖板正在执行开关动作，请等待完成");
+    return;
+  }
   server.send(200, "text/plain; charset=utf-8", "正在平滑移动到目标位置");
 }
 
@@ -602,6 +614,8 @@ void handleLightOff() {
 
 void openCover() {
   if (isMoving || currentState == COVER_OPEN) return;
+  jogActive = false;
+  attachServoAtLogicalPosition();
   movementStartPulseUs = currentServoPulseUs;
   targetAngle = openAngle;
   movingToOpen = true;
@@ -613,6 +627,8 @@ void openCover() {
 
 void closeCover() {
   if (isMoving || currentState == COVER_CLOSED) return;
+  jogActive = false;
+  attachServoAtLogicalPosition();
   movementStartPulseUs = currentServoPulseUs;
   targetAngle = closeAngle;
   movingToOpen = false;
@@ -623,16 +639,25 @@ void closeCover() {
 }
 
 void haltCover() {
-  if (!isMoving) return;
+  if (!isMoving && !jogActive) return;
+  if (isMoving) currentState = movingToOpen ? COVER_CLOSED : COVER_OPEN;
   isMoving = false;
-  currentState = movingToOpen ? COVER_CLOSED : COVER_OPEN;
+  jogActive = false;
 }
 
 uint16_t angleToPulse(uint16_t angle) {
   return map(constrain(angle, 0, 270), 0, 270, SERVO_MIN_US, SERVO_MAX_US);
 }
 
+void attachServoAtLogicalPosition() {
+  if (servoAttached) return;
+  capServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
+  capServo.writeMicroseconds(currentServoPulseUs);
+  servoAttached = true;
+}
+
 void moveToPulse(uint16_t pulseUs) {
+  attachServoAtLogicalPosition();
   uint16_t clamped = constrain(pulseUs, SERVO_MIN_US, SERVO_MAX_US);
   capServo.writeMicroseconds(clamped);
   currentServoPulseUs = clamped;
@@ -645,21 +670,25 @@ void moveToAngle(uint16_t angle) {
 }
 
 // Smooth jog to angle (does not change cover state)
-void startJog(uint16_t angle) {
+bool startJog(uint16_t angle) {
+  if (isMoving) return false;
+  attachServoAtLogicalPosition();
   jogStartAngle = currentServoAngle;
   jogStartPulseUs = currentServoPulseUs;
   jogTargetAngle = constrain(angle, 0, 270);
   uint16_t distance = abs((int16_t)jogTargetAngle - (int16_t)jogStartAngle);
-  jogDurationMs = ((uint32_t)distance * JOG_TIME_PER_270_DEG_MS + 135) / 270;
+  uint32_t calculatedDurationMs = ((uint32_t)distance * JOG_TIME_PER_270_DEG_MS + 135) / 270;
+  jogDurationMs = calculatedDurationMs < MIN_JOG_DURATION_MS ? MIN_JOG_DURATION_MS : calculatedDurationMs;
   if (distance == 0) {
     targetAngle = jogTargetAngle;
     jogActive = false;
-    return;
+    return true;
   }
   jogStartTime = millis();
   lastServoUpdateTime = jogStartTime;
   jogActive = true;
   // Don't change isMoving or currentState — jog is temporary
+  return true;
 }
 
 // ==================== EEPROM ====================
@@ -988,7 +1017,7 @@ void processCommand(const char* command, Print& response) {
         response.println(">");
       } else {
         // V alone = version query
-        response.println(F("<v1.2.0-esp>"));
+        response.println(F("<v1.2.2-esp>"));
       }
       break;
 
@@ -999,10 +1028,13 @@ void processCommand(const char* command, Print& response) {
     // ── Jog commands (smooth servo move, no save) ──────
     case 'J':  // J<N> jog primary servo (smooth)
       if (param >= 0 && param <= 270) {
-        startJog(param);
-        response.print("<J");
-        response.print(param);
-        response.println(">");
+        if (startJog(param)) {
+          response.print("<J");
+          response.print(param);
+          response.println(">");
+        } else {
+          response.println(F("<E:BUSY>"));
+        }
       }
       break;
 
