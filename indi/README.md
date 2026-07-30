@@ -27,8 +27,8 @@ To compile and install the driver from source:
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/10thTeeAstronomy/DarkLight_CoverCalibrator.git
-cd DarkLight_CoverCalibrator/indi-dlc-src
+git clone https://github.com/Indigo2233/DLCoverCalibrator.git
+cd DLCoverCalibrator/indi/indi-dlc-src
 ```
 
 ### 2. Create a `build` directory
