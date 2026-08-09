@@ -1,0 +1,50 @@
+name: Firmware Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "firmware-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install board cores
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json
+          arduino-cli config add board_manager.additional_urls https://arduino.esp8266.com/stable/package_esp8266com_index.json
+          arduino-cli core update-index
+          arduino-cli core install MiniCore:avr@3.1.2
+          arduino-cli core install esp8266:esp8266@3.1.2
+      - name: Compile firmware
+        run: |
+          mkdir -p build/avr build/esp assets
+          arduino-cli compile --fqbn MiniCore:avr:328:variant=modelPB --libraries dlc_firmware/DLC_Library --output-dir build/avr dlc_firmware
+          arduino-cli compile --fqbn esp8266:esp8266:d1_mini --output-dir build/esp esp8266_lenscap
+          cp "$(find build/avr -name '*.hex' ! -name '*with_bootloader*' | head -1)" assets/dlc-cover-atmega328pb-v1.2.0.hex
+          cp "$(find build/esp -name '*.bin' | head -1)" assets/dlc-lenscap-esp8266-v1.2.2.bin
+      - name: Create firmware manifest
+        shell: python
+        run: |
+          import hashlib, json
+          from pathlib import Path
+          items = [
+            dict(id="dlc-cover-atmega328pb", displayName="DLC Cover ATmega328PB", deviceKind="CoverCalibrator", hardwareId="atmega328pb-rev1", version="1.2.0", protocolVersion=1, identityPattern=r"^<v\d+\.\d+\.\d+>$", target="MiniCore328PB", fileName="dlc-cover-atmega328pb-v1.2.0.hex", baudRate=115200, notes="DLC CH340 controller using MiniCore ATmega328PB"),
+            dict(id="dlc-lenscap-esp8266", displayName="DLC Lens Cap ESP8266", deviceKind="CoverCalibrator", hardwareId="esp8266-d1mini-lenscap", version="1.2.2", protocolVersion=1, identityPattern=r"^<v\d+\.\d+\.\d+-esp>$", target="Esp8266", fileName="dlc-lenscap-esp8266-v1.2.2.bin", baudRate=115200, notes="Wemos D1 mini / NodeMCU lens-cap controller")
+          ]
+          for item in items:
+            item["sha256"] = hashlib.sha256((Path("assets") / item["fileName"]).read_bytes()).hexdigest().upper()
+          manifest = {"schemaVersion": 1, "repository": "Indigo2233/DLCoverCalibrator", "firmware": items}
+          Path("assets/firmware-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: assets/*
+          generate_release_notes: true
