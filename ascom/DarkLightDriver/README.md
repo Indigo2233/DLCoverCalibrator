@@ -1,6 +1,6 @@
 # DarkLight Cover Calibrator — Custom ASCOM Driver
 
-## 1.1.0 连接方式
+## 1.2.0 连接方式
 
 - `Serial`：Arduino Nano 或 ESP8266 USB 串口，默认 115200 baud
 - `TCP`：ESP8266 的 STA/AP 地址，默认端口 `4030`
@@ -17,7 +17,6 @@
 | 平场板亮度控制 | ✓ | ✓ |
 | 除露加热控制 | ✓ | ✓ |
 | **主舵机开合角度配置** | ✗ (需刷固件) | **✓ (Setup 界面)** |
-| **副舵机开合角度配置** | ✗ (需刷固件) | **✓ (Setup 界面)** |
 | 源码可修改 | ✗ (闭源) | **✓ (开源)** |
 
 ## 前提条件
@@ -25,7 +24,7 @@
 - Windows 10/11
 - [ASCOM Platform 7](https://ascom-standards.org/) 或更新版本
 - .NET Framework 4.8
-- DLC 固件已刷入并支持角度命令（`UO`、`UC`、`VO`、`VC`、`uO`、`i`、`vO`、`vC`）
+- DLC 固件已刷入并支持角度命令（`UO`、`UC`、`uO`、`i`）
 
 ## 编译
 
@@ -54,7 +53,7 @@ dotnet build -c Release
 - **Baud Rate** — 9600~230400
 - 连接状态指示灯 + 固件版本显示
 
-### Panel 1 / Panel 2（主/副舵机）
+### 舵机角度
 
 每个面板包含两组控制：
 
@@ -65,8 +64,6 @@ dotnet build -c Release
 **打开方向** (绿色)
 - 当前角度值（大字体）+ **±1° / ±10° / ±45°** 实时微调
 - 「设为打开位置」一键保存当前位置
-
-> 如果固件未编译 `SECONDARY_SERVO_INSTALLED`，副舵机 jog 命令返回 `?`，不影响使用。
 
 ### 底部按钮
 - **重设** — 恢复默认角度（开=0° 关=180°）
@@ -93,11 +90,8 @@ dotnet build -c Release
 | `L` / `B` / `M` | 查询平场板状态 / 亮度 / 最大亮度 |
 | `T<值>` / `F` | 开平场板 / 关平场板 |
 | `UO<角度>` / `UC<角度>` | 设置主舵机开/关角度（写入 EEPROM） |
-| `VO<角度>` / `VC<角度>` | 设置副舵机开/关角度 |
 | `uO` / `i` | 查询主舵机开/关角度 |
-| `vO` / `vC` | 查询副舵机开/关角度 |
 | `J<角度>` / `j` | 🆕 Jog 主舵机直驱 / 查询当前位置 |
-| `K<角度>` / `k` | 🆕 Jog 副舵机直驱 / 查询当前位置 |
 | `Z` | 握手（返回 `?`） |
 | `V` | 查询固件版本 |
 
@@ -114,6 +108,7 @@ dotnet build -c Release
 |------|---------|
 | 设备连接失败 | 检查 COM 端口号和波特率 (115200) |
 | 握手失败 (返回不是 `?`) | 确认固件已编译 `ENABLE_SERIAL_CONTROL` |
+| 运行中连续无响应 | 驱动会在两次失败的轮询周期后自动释放并重建连接 |
+| 自动恢复失败 | 在 NINA/ASCOM Actions 中执行 `ResetDevice`；仍失败时重新插拔 USB，或在 Windows 设备管理器中禁用后重新启用 CH340 |
 | 角度设置无效 | 确认已更新固件支持 `UO`/`UC` 等命令 |
-| 副舵机角度不生效 | 检查固件是否编译了 `SECONDARY_SERVO_INSTALLED` |
 | 驱动不出现在 ASCOM Chooser | 以管理员运行 `Install.bat` |

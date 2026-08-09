@@ -30,8 +30,6 @@ namespace DarkLight.CoverCalibrator
         private NumericUpDown _numBrightness;
         private Label _lblPrimaryCloseVal;
         private Label _lblPrimaryOpenVal;
-        private Label _lblSecondaryCloseVal;
-        private Label _lblSecondaryOpenVal;
 
         private static readonly Color BgColor = Color.FromArgb(45, 45, 50);
         private static readonly Color PanelBg = Color.FromArgb(55, 55, 60);
@@ -57,7 +55,7 @@ namespace DarkLight.CoverCalibrator
         private void InitializeComponent()
         {
             Text = "DarkLight Cover Calibrator — Setup";
-            Size = new Size(760, 740);
+            Size = new Size(760, 575);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -160,14 +158,9 @@ namespace DarkLight.CoverCalibrator
             y += 184;
 
             // ── Primary Servo ──
-            var grpPrimary = CreateServoPanel("主舵机角度", true, 12, y, 720, 150);
+            var grpPrimary = CreateServoPanel("舵机角度", 12, y, 720, 150);
             Controls.Add(grpPrimary);
             y += 164;
-
-            // ── Secondary Servo ──
-            var grpSecondary = CreateServoPanel("副舵机角度", false, 12, y, 720, 150);
-            Controls.Add(grpSecondary);
-            y += 166;
 
             // ── Bottom Buttons ──
             var btnReset = MakeButton("重置默认角度", 12, y + 4, 120, 32);
@@ -254,7 +247,7 @@ namespace DarkLight.CoverCalibrator
             parent.Controls.Add(_lblSensor);
         }
 
-        private GroupBox CreateServoPanel(string title, bool isPrimary, int x, int y, int w, int h)
+        private GroupBox CreateServoPanel(string title, int x, int y, int w, int h)
         {
             var grp = new GroupBox
             {
@@ -265,12 +258,12 @@ namespace DarkLight.CoverCalibrator
                 Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold)
             };
 
-            CreateAngleRow(grp, isPrimary, false, 28);  // Open row
-            CreateAngleRow(grp, isPrimary, true, 94);    // Close row
+            CreateAngleRow(grp, false, 28);  // Open row
+            CreateAngleRow(grp, true, 94);   // Close row
             return grp;
         }
 
-        private void CreateAngleRow(GroupBox parent, bool isPrimary, bool isClose, int y)
+        private void CreateAngleRow(GroupBox parent, bool isClose, int y)
         {
             string labelText = isClose ? "关闭位置" : "打开位置";
             Color accent = isClose ? CloseColor : OpenColor;
@@ -279,16 +272,14 @@ namespace DarkLight.CoverCalibrator
             parent.Controls.Add(MakeLabel(labelText, 18, y + 4, 68, 22, accent));
 
             // Angle value display
-            int currentAngle = GetSavedAngle(isPrimary, isClose);
+            int currentAngle = GetSavedAngle(isClose);
             var valueLabel = MakeLabel($"{currentAngle}°", 92, y, 60, 30, TextColor);
             valueLabel.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold);
             valueLabel.TextAlign = ContentAlignment.MiddleLeft;
             parent.Controls.Add(valueLabel);
 
-            if (isPrimary && isClose) _lblPrimaryCloseVal = valueLabel;
-            if (isPrimary && !isClose) _lblPrimaryOpenVal = valueLabel;
-            if (!isPrimary && isClose) _lblSecondaryCloseVal = valueLabel;
-            if (!isPrimary && !isClose) _lblSecondaryOpenVal = valueLabel;
+            if (isClose) _lblPrimaryCloseVal = valueLabel;
+            else _lblPrimaryOpenVal = valueLabel;
 
             // Save as Open/Close button
             var btnSet = MakeButton(isClose ? "保存为关闭" : "保存为打开", 165, y, 110, 30);
@@ -296,17 +287,17 @@ namespace DarkLight.CoverCalibrator
             btnSet.Click += (s, e) =>
             {
                 if (!EnsureConnected()) return;
-                int pos = isPrimary ? _driver.GetPrimaryPosition() : _driver.GetSecondaryPosition();
-                SaveAngle(isPrimary, isClose, pos);
+                int pos = _driver.GetPrimaryPosition();
+                SaveAngle(isClose, pos);
                 valueLabel.Text = $"{pos}°";
             };
             parent.Controls.Add(btnSet);
 
             // Jog buttons
-            AddJogButtons(parent, 295, y + 1, isPrimary, isClose, valueLabel);
+            AddJogButtons(parent, 295, y + 1, isClose, valueLabel);
         }
 
-        private void AddJogButtons(Control parent, int x, int y, bool isPrimary, bool isClose, Label valLabel)
+        private void AddJogButtons(Control parent, int x, int y, bool isClose, Label valLabel)
         {
             int[] steps = { -45, -10, -1, 1, 10, 45 };
             int cx = x;
@@ -322,15 +313,12 @@ namespace DarkLight.CoverCalibrator
                     if (!EnsureConnected()) return;
 
                     int delta = (int)((Button)s).Tag;
-                    int current = isPrimary ? _driver.GetPrimaryPosition() : _driver.GetSecondaryPosition();
+                    int current = _driver.GetPrimaryPosition();
                     int newAngle = Clamp(current + delta, 0, Driver.MaxServoAngle);
 
-                    if (isPrimary)
-                        _driver.JogPrimary(newAngle);
-                    else
-                        _driver.JogSecondary(newAngle);
+                    _driver.JogPrimary(newAngle);
 
-                    SaveAngle(isPrimary, isClose, newAngle);
+                    SaveAngle(isClose, newAngle);
                     valLabel.Text = $"{newAngle}°";
                 };
                 parent.Controls.Add(btn);
@@ -550,19 +538,15 @@ namespace DarkLight.CoverCalibrator
         private void BtnReset_Click(object sender, EventArgs e)
         {
             var result = MessageBox.Show(
-                "\u786e\u5b9a\u8981\u91cd\u7f6e\u4e3a\u9ed8\u8ba4\u503c\u5417\uff1f\n\n\u4e3b\u8235\u673a: \u5f00=0\u00b0 \u5173=180\u00b0\n\u526f\u8235\u673a: \u5f00=0\u00b0 \u5173=180\u00b0",
+                "\u786e\u5b9a\u8981\u91cd\u7f6e\u4e3a\u9ed8\u8ba4\u503c\u5417\uff1f\n\n\u8235\u673a: \u5f00=0\u00b0 \u5173=180\u00b0",
                 "\u91cd\u7f6e\u89d2\u5ea6", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 
             if (result == DialogResult.Yes)
             {
                 _driver.SetPrimaryOpenAngle(0);
                 _driver.SetPrimaryCloseAngle(180);
-                _driver.SetSecondaryOpenAngle(0);
-                _driver.SetSecondaryCloseAngle(180);
                 _lblPrimaryOpenVal.Text = "0\u00b0";
                 _lblPrimaryCloseVal.Text = "180\u00b0";
-                _lblSecondaryOpenVal.Text = "0\u00b0";
-                _lblSecondaryCloseVal.Text = "180\u00b0";
             }
         }
 
@@ -581,22 +565,15 @@ namespace DarkLight.CoverCalibrator
             return false;
         }
 
-        private int GetSavedAngle(bool isPrimary, bool isClose)
+        private int GetSavedAngle(bool isClose)
         {
-            if (isPrimary)
-            {
-                return isClose ? _driver.PrimaryCloseAngle : _driver.PrimaryOpenAngle;
-            }
-
-            return isClose ? _driver.SecondaryCloseAngle : _driver.SecondaryOpenAngle;
+            return isClose ? _driver.PrimaryCloseAngle : _driver.PrimaryOpenAngle;
         }
 
-        private void SaveAngle(bool isPrimary, bool isClose, int angle)
+        private void SaveAngle(bool isClose, int angle)
         {
-            if (isPrimary && isClose) _driver.SetPrimaryCloseAngle(angle);
-            if (isPrimary && !isClose) _driver.SetPrimaryOpenAngle(angle);
-            if (!isPrimary && isClose) _driver.SetSecondaryCloseAngle(angle);
-            if (!isPrimary && !isClose) _driver.SetSecondaryOpenAngle(angle);
+            if (isClose) _driver.SetPrimaryCloseAngle(angle);
+            else _driver.SetPrimaryOpenAngle(angle);
         }
 
         private Button MakeButton(string text, int x, int y, int w, int h)

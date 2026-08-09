@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("DarkLight Cover Calibrator ASCOM Driver")]
@@ -14,5 +15,6 @@ using System.Runtime.InteropServices;
 
 [assembly: Guid("D1E2F3A4-B5C6-4789-A0B1-C2D3E4F5A6B7")]
 
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: InternalsVisibleTo("DarkLightDriver.ProtocolTests")]

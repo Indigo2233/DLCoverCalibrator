@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO.Ports;
 using System.Net.Sockets;
 using System.Text;
@@ -15,42 +15,97 @@ namespace DarkLight.CoverCalibrator
         bool Handshake();
     }
 
+    internal interface IRecoverableDeviceConnection
+    {
+        bool TryRecover();
+    }
+
+    internal interface ISerialPortAdapter : IDisposable
+    {
+        bool IsOpen { get; }
+        int ReadTimeout { get; set; }
+        int WriteTimeout { get; set; }
+        bool DtrEnable { get; set; }
+        bool RtsEnable { get; set; }
+        string NewLine { get; set; }
+        void Open();
+        void Close();
+        void DiscardInBuffer();
+        void DiscardOutBuffer();
+        void Write(string value);
+        int ReadChar();
+    }
+
+    internal sealed class SerialPortAdapter : ISerialPortAdapter
+    {
+        private readonly SerialPort _port;
+
+        public SerialPortAdapter(string portName, int baudRate)
+        {
+            _port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One);
+        }
+
+        public bool IsOpen => _port.IsOpen;
+        public int ReadTimeout { get => _port.ReadTimeout; set => _port.ReadTimeout = value; }
+        public int WriteTimeout { get => _port.WriteTimeout; set => _port.WriteTimeout = value; }
+        public bool DtrEnable { get => _port.DtrEnable; set => _port.DtrEnable = value; }
+        public bool RtsEnable { get => _port.RtsEnable; set => _port.RtsEnable = value; }
+        public string NewLine { get => _port.NewLine; set => _port.NewLine = value; }
+        public void Open() => _port.Open();
+        public void Close() => _port.Close();
+        public void DiscardInBuffer() => _port.DiscardInBuffer();
+        public void DiscardOutBuffer() => _port.DiscardOutBuffer();
+        public void Write(string value) => _port.Write(value);
+        public int ReadChar() => _port.ReadChar();
+        public void Dispose() => _port.Dispose();
+    }
+
     /// <summary>
     /// Manages serial communication with the DLC firmware.
     /// Protocol: commands are wrapped in &lt; &gt; delimiters.
     /// Example: &lt;O&gt; for open, &lt;P&gt; for poll cover state.
     /// </summary>
-    public class DeviceSerial : IDeviceConnection
+    public class DeviceSerial : IDeviceConnection, IRecoverableDeviceConnection
     {
-        private SerialPort _serialPort;
-        private readonly object _lock = new object();
         private const int ReadTimeoutMs = 5000;
         private const int WriteTimeoutMs = 2000;
         private const int MaxRetries = 3;
+        private const int DtrPulseMs = 100;
+        private const int PortRecoveryDelayMs = 1500;
 
-        public bool IsOpen => _serialPort != null && _serialPort.IsOpen;
+        private readonly object _lock = new object();
+        private readonly Func<string, int, ISerialPortAdapter> _portFactory;
+        private readonly Action<int> _delay;
+        private ISerialPortAdapter _serialPort;
+        private string _currentPortName;
+        private int _currentBaudRate;
 
         public DeviceSerial()
+            : this((portName, baudRate) => new SerialPortAdapter(portName, baudRate), Thread.Sleep)
         {
         }
 
+        internal DeviceSerial(
+            Func<string, int, ISerialPortAdapter> portFactory,
+            Action<int> delay)
+        {
+            _portFactory = portFactory ?? throw new ArgumentNullException(nameof(portFactory));
+            _delay = delay ?? throw new ArgumentNullException(nameof(delay));
+        }
+
+        public bool IsOpen => _serialPort != null && _serialPort.IsOpen;
+
         public void Open(string portName, int baudRate)
         {
+            if (string.IsNullOrWhiteSpace(portName))
+                throw new ArgumentException("A serial port name is required.", nameof(portName));
+
             lock (_lock)
             {
-                Close();
-                _serialPort = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One)
-                {
-                    ReadTimeout = ReadTimeoutMs,
-                    WriteTimeout = WriteTimeoutMs,
-                    DtrEnable = false,
-                    RtsEnable = false,
-                    NewLine = "\n"
-                };
-                _serialPort.Open();
-                // flush any stale data
-                _serialPort.DiscardInBuffer();
-                _serialPort.DiscardOutBuffer();
+                _currentPortName = portName;
+                _currentBaudRate = baudRate;
+                ClosePortNoThrow();
+                OpenPort();
             }
         }
 
@@ -58,92 +113,178 @@ namespace DarkLight.CoverCalibrator
         {
             lock (_lock)
             {
-                if (_serialPort != null)
-                {
-                    try
-                    {
-                        if (_serialPort.IsOpen)
-                        {
-                            _serialPort.DtrEnable = false;
-                            _serialPort.RtsEnable = false;
-                            _serialPort.Close();
-                        }
-                    }
-                    catch { /* ignore */ }
-                    _serialPort.Dispose();
-                    _serialPort = null;
-                }
+                ClosePortNoThrow();
             }
         }
 
         /// <summary>
-        /// Send a command and return the response content (without delimiters).
-        /// Returns null on failure.
+        /// Send a command and return the response content without delimiters.
+        /// Returns null after the bounded retry sequence fails.
         /// </summary>
         public string SendCommand(string command)
         {
             lock (_lock)
             {
-                if (!IsOpen)
-                    return null;
-
-                string fullCmd = $"<{command}>";
-
-                for (int retry = 0; retry < MaxRetries; retry++)
-                {
-                    try
-                    {
-                        _serialPort.DiscardInBuffer();
-                        _serialPort.Write(fullCmd);
-
-                        // Read response: expect <response>
-                        var response = ReadResponse();
-                        if (response != null)
-                            return response;
-                    }
-                    catch (TimeoutException)
-                    {
-                        // Retry
-                        if (retry == MaxRetries - 1)
-                            return null;
-                        Thread.Sleep(200);
-                    }
-                    catch (Exception)
-                    {
-                        return null;
-                    }
-                }
-
-                return null;
+                return SendCommand(command, MaxRetries);
             }
+        }
+
+        /// <summary>
+        /// Sends one bounded handshake. If it fails, pulse DTR, fully release the
+        /// old serial-port instance, reopen the configured port, and try once more.
+        /// </summary>
+        public bool Handshake()
+        {
+            lock (_lock)
+            {
+                if (SendCommand("Z", 1) == "?")
+                    return true;
+
+                return TryRecoverLocked();
+            }
+        }
+
+        public bool TryRecover()
+        {
+            lock (_lock)
+            {
+                return TryRecoverLocked();
+            }
+        }
+
+        private bool TryRecoverLocked()
+        {
+            if (string.IsNullOrWhiteSpace(_currentPortName))
+                return false;
+
+            PulseDtrNoThrow();
+            ClosePortNoThrow();
+            _delay(PortRecoveryDelayMs);
+
+            try
+            {
+                OpenPort();
+                return SendCommand("Z", 1) == "?";
+            }
+            catch
+            {
+                ClosePortNoThrow();
+                return false;
+            }
+        }
+
+        private void OpenPort()
+        {
+            var port = _portFactory(_currentPortName, _currentBaudRate);
+            try
+            {
+                port.ReadTimeout = ReadTimeoutMs;
+                port.WriteTimeout = WriteTimeoutMs;
+                port.DtrEnable = false;
+                port.RtsEnable = false;
+                port.NewLine = "\n";
+                port.Open();
+                port.DiscardInBuffer();
+                port.DiscardOutBuffer();
+                _serialPort = port;
+            }
+            catch
+            {
+                try { port.Dispose(); } catch { }
+                throw;
+            }
+        }
+
+        private void PulseDtrNoThrow()
+        {
+            try
+            {
+                if (_serialPort != null && _serialPort.IsOpen)
+                {
+                    _serialPort.DtrEnable = true;
+                    _delay(DtrPulseMs);
+                    _serialPort.DtrEnable = false;
+                }
+            }
+            catch
+            {
+                // Recovery continues by fully releasing and rebuilding the port.
+            }
+        }
+
+        private void ClosePortNoThrow()
+        {
+            var port = _serialPort;
+            _serialPort = null;
+            if (port == null)
+                return;
+
+            try { port.DtrEnable = false; } catch { }
+            try { port.RtsEnable = false; } catch { }
+            try
+            {
+                if (port.IsOpen)
+                    port.Close();
+            }
+            catch { }
+            try { port.Dispose(); } catch { }
+        }
+
+        private string SendCommand(string command, int maxRetries)
+        {
+            if (!IsOpen)
+                return null;
+
+            string fullCommand = $"<{command}>";
+            for (int retry = 0; retry < maxRetries; retry++)
+            {
+                try
+                {
+                    _serialPort.DiscardInBuffer();
+                    _serialPort.Write(fullCommand);
+
+                    var response = ReadResponse();
+                    if (response != null)
+                        return response;
+                }
+                catch (TimeoutException)
+                {
+                    if (retry == maxRetries - 1)
+                        return null;
+                    _delay(200);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            return null;
         }
 
         private string ReadResponse()
         {
-            var sb = new StringBuilder();
+            var response = new StringBuilder();
             bool inResponse = false;
-            var startTime = Environment.TickCount;
+            int startTime = Environment.TickCount;
 
-            while ((Environment.TickCount - startTime) < ReadTimeoutMs)
+            while (unchecked(Environment.TickCount - startTime) < ReadTimeoutMs)
             {
                 try
                 {
-                    int b = _serialPort.ReadChar();
-                    char c = (char)b;
-
-                    if (c == '<')
+                    char value = (char)_serialPort.ReadChar();
+                    if (value == '<')
                     {
                         inResponse = true;
-                        sb.Clear();
+                        response.Clear();
                     }
-                    else if (c == '>')
+                    else if (value == '>' && inResponse)
                     {
-                        if (inResponse)
-                            return sb.ToString();
+                        return response.ToString();
                     }
                     else if (inResponse)
                     {
-                        sb.Append(c);
+                        response.Append(value);
                     }
                 }
                 catch (TimeoutException)
@@ -152,16 +293,7 @@ namespace DarkLight.CoverCalibrator
                 }
             }
 
-            return sb.Length > 0 ? sb.ToString() : null;
-        }
-
-        /// <summary>
-        /// Handshake: send an unknown command ('Z'), expect '?' back.
-        /// </summary>
-        public bool Handshake()
-        {
-            var response = SendCommand("Z");
-            return response != null && response == "?";
+            return null;
         }
 
         public void Dispose()
@@ -174,7 +306,7 @@ namespace DarkLight.CoverCalibrator
     /// Manages TCP communication with the ESP8266 DLC firmware.
     /// Uses the same &lt;command&gt;/&lt;response&gt; framing as USB serial.
     /// </summary>
-    public class DeviceTcp : IDeviceConnection
+    public class DeviceTcp : IDeviceConnection, IRecoverableDeviceConnection
     {
         private TcpClient _client;
         private NetworkStream _stream;
@@ -183,6 +315,9 @@ namespace DarkLight.CoverCalibrator
         private const int WriteTimeoutMs = 2000;
         private const int ConnectTimeoutMs = 5000;
         private const int MaxRetries = 3;
+        private const int RecoveryDelayMs = 500;
+        private string _currentHost;
+        private int _currentPort;
 
         public bool IsOpen => _client != null && _client.Connected && _stream != null;
 
@@ -190,6 +325,8 @@ namespace DarkLight.CoverCalibrator
         {
             lock (_lock)
             {
+                _currentHost = host;
+                _currentPort = port;
                 Close();
                 _client = new TcpClient { NoDelay = true };
                 var result = _client.BeginConnect(host, port, null, null);
@@ -259,19 +396,19 @@ namespace DarkLight.CoverCalibrator
             {
                 int value = _stream.ReadByte();
                 if (value < 0) return null;
-                char c = (char)value;
-                if (c == '<')
+                char character = (char)value;
+                if (character == '<')
                 {
                     inResponse = true;
                     response.Clear();
                 }
-                else if (c == '>' && inResponse)
+                else if (character == '>' && inResponse)
                 {
                     return response.ToString();
                 }
                 else if (inResponse)
                 {
-                    response.Append(c);
+                    response.Append(character);
                 }
             }
         }
@@ -279,6 +416,28 @@ namespace DarkLight.CoverCalibrator
         public bool Handshake()
         {
             return SendCommand("Z") == "?";
+        }
+
+        public bool TryRecover()
+        {
+            lock (_lock)
+            {
+                if (string.IsNullOrWhiteSpace(_currentHost) || _currentPort <= 0)
+                    return false;
+
+                try
+                {
+                    Close();
+                    Thread.Sleep(RecoveryDelayMs);
+                    Open(_currentHost, _currentPort);
+                    return Handshake();
+                }
+                catch
+                {
+                    Close();
+                    return false;
+                }
+            }
         }
 
         public void Dispose()

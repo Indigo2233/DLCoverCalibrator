@@ -11,7 +11,6 @@
 | 除露加热控制 | ✓ | ✓ |
 | 宽带/窄带亮度预设 | ✓ | ✓ |
 | **主舵机开合角度配置** | ✗ | **✓** |
-| **副舵机开合角度配置** | ✗ | **✓** |
 | **源码可修改** | ✗ | **✓** |
 
 ## 项目结构
@@ -65,13 +64,9 @@ Uninstall.bat
 - **COM Port** — 下拉选择 + ↻ 刷新按钮
 - **Baud Rate** — 9600 / 19200 / 38400 / 57600 / **115200** / 230400
 
-### Primary Servo Angles
+### Servo Angles
 - **Open Angle** — 开盖时舵机目标角度 (0–270°)
 - **Close Angle** — 关盖时舵机目标角度 (0–270°)
-
-### Secondary Servo Angles
-- **Open Angle** — 副舵机开盖角度 (0–270°)
-- **Close Angle** — 副舵机关盖角度 (0–270°)
 
 ### Polling
 - **Poll Interval** — 状态轮询间隔 (500–10000 ms)
@@ -90,8 +85,9 @@ Uninstall.bat
 | 驱动不在 Chooser 中 | 以管理员运行 `Install.bat` |
 | 连接失败 | 检查 COM 端口和 115200 波特率 |
 | 握手失败 | 固件需编译 `ENABLE_SERIAL_CONTROL` |
+| 运行中连续无响应 | 驱动会自动停止轮询、执行 DTR 复位并重建串口 |
+| 自动恢复失败 | 在 ASCOM Actions 中执行 `ResetDevice`；仍失败时重新插拔 USB，或在设备管理器中禁用后重新启用 CH340 |
 | 角度设置无效 | 更新固件支持 `UO`/`UC` 等命令 |
-| 副舵机角度无响应 | 固件需编译 `SECONDARY_SERVO_INSTALLED` |
 
 ## 技术细节
 
@@ -99,4 +95,5 @@ Uninstall.bat
 - **通信**: Serial port, `<command>` 帧协议
 - **持久化**: ASCOM Profile (Windows Registry)
 - **轮询**: `System.Timers.Timer` 定时刷新状态
-- **线程安全**: `lock` 保护串口操作
+- **线程安全**: 串口操作和连接切换使用互斥保护，轮询回调禁止重入
+- **恢复策略**: 握手失败时执行一次 DTR 复位和串口重建；运行期连续两次轮询失败后自动恢复

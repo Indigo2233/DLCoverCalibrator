@@ -27,7 +27,10 @@ namespace DarkLight.CoverCalibrator
         private const string DriverId = "DarkLight.CoverCalibrator";
         private const string DriverName = "DarkLight Cover Calibrator";
         private const string DriverDescription = "ASCOM driver for the DIY DarkLight Cover Calibrator";
-        private const string DriverVersionString = "1.1.0";
+        private const string DriverVersionString = "1.2.0";
+        private const int MaxConnectionAttempts = 2;
+        private const int ConnectionRetryDelayMs = 1500;
+        private const int PollFailuresBeforeRecovery = 2;
         public const int MaxServoAngle = 270;
 
         // ── Internal state ─────────────────────────────────────────
@@ -41,10 +44,7 @@ namespace DarkLight.CoverCalibrator
         private int _maxBrightness;
         private int _primaryOpenAngle = 0;
         private int _primaryCloseAngle = 180;
-        private int _secondaryOpenAngle = 0;
-        private int _secondaryCloseAngle = 180;
         private int? _primaryCurrentPosition;
-        private int? _secondaryCurrentPosition;
         private string _portName = "COM3";
         private int _baudRate = 115200;
         private string _transport = "Serial";
@@ -53,6 +53,11 @@ namespace DarkLight.CoverCalibrator
         private int _pollIntervalMs = 1000;
         private bool _disposed;
         private bool _connecting;
+        private readonly object _connectionLock = new object();
+        private readonly Func<IDeviceConnection> _deviceFactory;
+        private readonly bool _enablePolling = true;
+        private int _refreshInProgress;
+        private int _consecutivePollFailures;
 
         // ── ASCOM profile keys ─────────────────────────────────────
         private const string ProfilePortName = "PortName";
@@ -63,8 +68,6 @@ namespace DarkLight.CoverCalibrator
         private const string ProfilePollInterval = "PollIntervalMs";
         private const string ProfilePrimaryOpenAngle = "PrimaryOpenAngle";
         private const string ProfilePrimaryCloseAngle = "PrimaryCloseAngle";
-        private const string ProfileSecondaryOpenAngle = "SecondaryOpenAngle";
-        private const string ProfileSecondaryCloseAngle = "SecondaryCloseAngle";
         private const string TraceName = "DarkLight.CoverCalibrator";
 
         // ── ASCOM trace logger ─────────────────────────────────────
@@ -80,6 +83,12 @@ namespace DarkLight.CoverCalibrator
             ReadProfile();
             _device = CreateDeviceConnection();
             LogMessage("Driver", "Constructor complete");
+        }
+
+        internal Driver(Func<IDeviceConnection> deviceFactory)
+        {
+            _deviceFactory = deviceFactory ?? throw new ArgumentNullException(nameof(deviceFactory));
+            _enablePolling = false;
         }
 
         // ────────────────────────────────────────────────────────────
@@ -144,7 +153,6 @@ namespace DarkLight.CoverCalibrator
             if (_coverStatus == CoverStatus.Open)
             {
                 _primaryCurrentPosition = _primaryOpenAngle;
-                _secondaryCurrentPosition = _secondaryOpenAngle;
             }
         }
 
@@ -164,7 +172,6 @@ namespace DarkLight.CoverCalibrator
             if (_coverStatus == CoverStatus.Closed)
             {
                 _primaryCurrentPosition = _primaryCloseAngle;
-                _secondaryCurrentPosition = _secondaryCloseAngle;
             }
         }
 
@@ -247,8 +254,7 @@ namespace DarkLight.CoverCalibrator
                 var info = $"DarkLight Cover Calibrator Driver {DriverVersionString}\n" +
                           $"Connected: {_connected}\n" +
                           $"Port: {_portName} @ {_baudRate} baud\n" +
-                          $"Primary Open Angle: {_primaryOpenAngle}°  Close Angle: {_primaryCloseAngle}°\n" +
-                          $"Secondary Open Angle: {_secondaryOpenAngle}°  Close Angle: {_secondaryCloseAngle}°";
+                          $"Open Angle: {_primaryOpenAngle}°  Close Angle: {_primaryCloseAngle}°";
                 return info;
             }
         }
@@ -290,7 +296,10 @@ namespace DarkLight.CoverCalibrator
 
         #region Optional ASCOM methods
 
-        private static ArrayList _supportedActions = new ArrayList();
+        private static readonly ArrayList _supportedActions = new ArrayList
+        {
+            "ResetDevice"
+        };
         public ArrayList SupportedActions
         {
             get { return _supportedActions; }
@@ -299,6 +308,9 @@ namespace DarkLight.CoverCalibrator
         public string Action(string ActionName, string ActionParameters)
         {
             LogMessage("Action", $"name={ActionName}, params={ActionParameters}");
+            if (string.Equals(ActionName, "ResetDevice", StringComparison.OrdinalIgnoreCase))
+                return ResetDevice();
+
             throw new ActionNotImplementedException("Action " + ActionName + " is not implemented by this driver");
         }
 
@@ -357,76 +369,142 @@ namespace DarkLight.CoverCalibrator
 
         public void Connect()
         {
-            _connecting = true;
-            try
+            lock (_connectionLock)
             {
-            _device?.Dispose();
-            _device = CreateDeviceConnection();
-            string endpoint = IsTcpTransport ? _tcpHost : _portName;
-            int parameter = IsTcpTransport ? _tcpPort : _baudRate;
-            LogMessage("Connect", $"Opening {_transport} {endpoint}:{parameter}");
-            _device.Open(endpoint, parameter);
+                _connecting = true;
+                try
+                {
+                    StopPolling();
+                    _connected = false;
 
-            // Handshake
-            if (!_device.Handshake())
-            {
-                _device.Close();
-                throw new ASCOM.NotConnectedException("Failed handshake with DLC device. Check transport settings and firmware.");
-            }
-            LogMessage("Connect", "Handshake successful");
+                    if (!OpenConnectionWithRecovery())
+                    {
+                        throw new ASCOM.NotConnectedException(
+                            "Failed handshake with the DLC device after bounded recovery attempts. " +
+                            "Check the configured endpoint and firmware. For a serial device, physically reconnect USB " +
+                            "or disable and re-enable the CH340 device in Windows Device Manager.");
+                    }
 
-            _connected = true;
-
-            // Use the firmware EEPROM angles as the source of truth on connect.
-            ReadDeviceAngles();
-
-            // Read initial state
-            RefreshState();
-
-            // Start polling
-            _pollTimer = new Timer(_pollIntervalMs);
-            _pollTimer.Elapsed += (s, e) => RefreshState();
-            _pollTimer.AutoReset = true;
-            _pollTimer.Start();
-
-            LogMessage("Connect", "Driver connected successfully");
-            }
-            finally
-            {
-                _connecting = false;
+                    CompleteConnection();
+                    StartPolling();
+                    LogMessage("Connect", "Driver connected successfully");
+                }
+                catch
+                {
+                    _connected = false;
+                    StopPolling();
+                    try { _device?.Close(); } catch { }
+                    ResetCachedState();
+                    throw;
+                }
+                finally
+                {
+                    _connecting = false;
+                }
             }
         }
 
         public void Disconnect()
         {
-            LogMessage("Disconnect", "called");
+            lock (_connectionLock)
+            {
+                LogMessage("Disconnect", "called");
+                _connected = false;
+                StopPolling();
+                try { _device?.Close(); } catch { }
+                ResetCachedState();
+            }
+        }
 
-            _pollTimer?.Stop();
-            _pollTimer?.Dispose();
-            _pollTimer = null;
+        private string ResetDevice()
+        {
+            lock (_connectionLock)
+            {
+                LogMessage("ResetDevice", "Recovery requested");
+                _connecting = true;
+                try
+                {
+                    StopPolling();
+                    _connected = false;
 
-            _device.Close();
-            _connected = false;
+                    bool recovered = TryRecoverCurrentDevice();
+                    if (!recovered)
+                        recovered = OpenConnectionWithRecovery();
 
-            _coverStatus = CoverStatus.Unknown;
-            _calibratorStatus = CalibratorStatus.Unknown;
-            _heaterState = 4;
-            _primaryCurrentPosition = null;
-            _secondaryCurrentPosition = null;
+                    if (!recovered)
+                    {
+                        ResetCachedState();
+                        return "Reset failed: the device did not answer after the serial port was released and rebuilt. " +
+                               "Physically reconnect USB or disable and re-enable the CH340 device in Windows Device Manager.";
+                    }
+
+                    CompleteConnection();
+                    StartPolling();
+                    LogMessage("ResetDevice", "Recovery succeeded");
+                    return "OK: device reset and reconnected.";
+                }
+                catch (Exception ex)
+                {
+                    _connected = false;
+                    StopPolling();
+                    try { _device?.Close(); } catch { }
+                    ResetCachedState();
+                    LogMessage("ResetDevice", $"Recovery error: {ex.Message}");
+                    return "Reset failed: " + ex.Message;
+                }
+                finally
+                {
+                    _connecting = false;
+                }
+            }
         }
 
         // ────────────────────────────────────────────────────────────
         // State Refresh (polled)
         // ────────────────────────────────────────────────────────────
 
-        private void RefreshState()
+        internal void RefreshState()
         {
-            if (!_connected) return;
+            if (Interlocked.Exchange(ref _refreshInProgress, 1) != 0)
+                return;
 
+            try
+            {
+                lock (_connectionLock)
+                {
+                    if (!_connected)
+                        return;
+
+                    if (RefreshStateCore())
+                    {
+                        _consecutivePollFailures = 0;
+                        return;
+                    }
+
+                    _consecutivePollFailures++;
+                    LogMessage("RefreshState",
+                        $"No response ({_consecutivePollFailures}/{PollFailuresBeforeRecovery})");
+                    if (_consecutivePollFailures >= PollFailuresBeforeRecovery)
+                        RecoverAfterPollingFailure();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage("RefreshState", $"Error: {ex.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _refreshInProgress, 0);
+            }
+        }
+
+        private bool RefreshStateCore()
+        {
             try
             {
                 // Poll cover state
                 var p = _device.SendCommand("P");
+                if (p == null) return false;
                 if (p != null && int.TryParse(p, out int coverVal))
                 {
                     _coverStatus = coverVal switch
@@ -442,6 +520,7 @@ namespace DarkLight.CoverCalibrator
 
                 // Poll calibrator state
                 var l = _device.SendCommand("L");
+                if (l == null) return false;
                 if (l != null && int.TryParse(l, out int calVal))
                 {
                     _calibratorStatus = calVal switch
@@ -457,6 +536,7 @@ namespace DarkLight.CoverCalibrator
 
                 // Poll brightness
                 var b = _device.SendCommand("B");
+                if (b == null) return false;
                 if (b != null && int.TryParse(b, out int brightVal))
                 {
                     _brightness = brightVal;
@@ -464,53 +544,144 @@ namespace DarkLight.CoverCalibrator
 
                 // Poll max brightness
                 var m = _device.SendCommand("M");
+                if (m == null) return false;
                 if (m != null && int.TryParse(m, out int maxVal))
                 {
                     _maxBrightness = maxVal;
                 }
 
                 var r = _device.SendCommand("R");
+                if (r == null) return false;
                 if (r != null && int.TryParse(r, out int heatVal))
                 {
                     _heaterState = heatVal;
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
-                LogMessage("RefreshState", $"Error: {ex.Message}");
+                LogMessage("RefreshStateCore", $"Error: {ex.Message}");
+                return false;
             }
+        }
+
+        private void RecoverAfterPollingFailure()
+        {
+            LogMessage("AutoRecover", "Polling stopped responding; rebuilding the connection");
+            StopPolling();
+            _connected = false;
+
+            bool recovered = TryRecoverCurrentDevice();
+            if (!recovered)
+                recovered = OpenConnectionWithRecovery();
+
+            if (!recovered)
+            {
+                ResetCachedState();
+                LogMessage("AutoRecover", "Recovery exhausted; driver is disconnected");
+                return;
+            }
+
+            try
+            {
+                CompleteConnection();
+                StartPolling();
+                LogMessage("AutoRecover", "Connection restored");
+            }
+            catch (Exception ex)
+            {
+                _connected = false;
+                StopPolling();
+                try { _device?.Close(); } catch { }
+                ResetCachedState();
+                LogMessage("AutoRecover", $"Recovery initialization failed: {ex.Message}");
+            }
+        }
+
+        private bool TryRecoverCurrentDevice()
+        {
+            return _device is IRecoverableDeviceConnection recoverable && recoverable.TryRecover();
+        }
+
+        private bool OpenConnectionWithRecovery()
+        {
+            string endpoint = IsTcpTransport ? _tcpHost : _portName;
+            int parameter = IsTcpTransport ? _tcpPort : _baudRate;
+
+            for (int attempt = 1; attempt <= MaxConnectionAttempts; attempt++)
+            {
+                try
+                {
+                    try { _device?.Dispose(); } catch { }
+                    _device = CreateDeviceConnection();
+                    LogMessage("Connect",
+                        $"Opening {_transport} {endpoint}:{parameter} (attempt {attempt}/{MaxConnectionAttempts})");
+                    _device.Open(endpoint, parameter);
+                    if (_device.Handshake())
+                    {
+                        LogMessage("Connect", "Handshake successful");
+                        return true;
+                    }
+
+                    LogMessage("Connect", $"Handshake failed on attempt {attempt}");
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("Connect", $"Attempt {attempt} failed: {ex.Message}");
+                }
+
+                try { _device?.Close(); } catch { }
+                if (attempt < MaxConnectionAttempts)
+                    Thread.Sleep(ConnectionRetryDelayMs);
+            }
+
+            return false;
+        }
+
+        private void CompleteConnection()
+        {
+            _connected = true;
+            _consecutivePollFailures = 0;
+            ReadDeviceAngles();
+            if (!RefreshStateCore())
+                LogMessage("Connect", "Connected, but the initial state refresh was incomplete");
+        }
+
+        private void StartPolling()
+        {
+            if (!_enablePolling || !_connected)
+                return;
+
+            StopPolling();
+            _pollTimer = new Timer(_pollIntervalMs);
+            _pollTimer.Elapsed += (s, e) => RefreshState();
+            _pollTimer.AutoReset = true;
+            _pollTimer.Start();
+        }
+
+        private void StopPolling()
+        {
+            var timer = _pollTimer;
+            _pollTimer = null;
+            if (timer == null)
+                return;
+
+            try { timer.Stop(); } catch { }
+            try { timer.Dispose(); } catch { }
+        }
+
+        private void ResetCachedState()
+        {
+            _coverStatus = CoverStatus.Unknown;
+            _calibratorStatus = CalibratorStatus.Unknown;
+            _heaterState = 4;
+            _primaryCurrentPosition = null;
         }
 
         // ────────────────────────────────────────────────────────────
         // Angle Management
         // ────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Push configured angles to the device.
-        /// Ensures firmware EEPROM matches ASCOM profile settings.
-        /// </summary>
-        private void SyncAngles()
-        {
-            if (!_connected) return;
-
-            LogMessage("SyncAngles", $"Primary Open={_primaryOpenAngle} Close={_primaryCloseAngle}");
-            _device.SendCommand($"UO{_primaryOpenAngle}");
-            // Small delay between commands
-            Thread.Sleep(50);
-            _device.SendCommand($"UC{_primaryCloseAngle}");
-
-            LogMessage("SyncAngles", $"Secondary Open={_secondaryOpenAngle} Close={_secondaryCloseAngle}");
-            Thread.Sleep(50);
-            _device.SendCommand($"VO{_secondaryOpenAngle}");
-            Thread.Sleep(50);
-            _device.SendCommand($"VC{_secondaryCloseAngle}");
-
-            // Read back to verify
-            Thread.Sleep(50);
-            var po = _device.SendCommand("uO");
-            var pc = _device.SendCommand("i");
-            LogMessage("SyncAngles", $"Readback Primary: Open={po} Close={pc}");
-        }
 
         public void ReadDeviceAngles()
         {
@@ -520,8 +691,6 @@ namespace DarkLight.CoverCalibrator
 
             changed |= TryReadDeviceAngle("uO", ref _primaryOpenAngle, "PrimaryOpenAngle");
             changed |= TryReadDeviceAngle("i", ref _primaryCloseAngle, "PrimaryCloseAngle");
-            changed |= TryReadDeviceAngle("vO", ref _secondaryOpenAngle, "SecondaryOpenAngle");
-            changed |= TryReadDeviceAngle("vC", ref _secondaryCloseAngle, "SecondaryCloseAngle");
 
             if (changed)
                 WriteProfile();
@@ -562,28 +731,8 @@ namespace DarkLight.CoverCalibrator
             WriteProfile();
         }
 
-        public void SetSecondaryOpenAngle(int angle)
-        {
-            angle = Clamp(angle, 0, MaxServoAngle);
-            _secondaryOpenAngle = angle;
-            if (_connected)
-                _device.SendCommand($"VO{angle}");
-            WriteProfile();
-        }
-
-        public void SetSecondaryCloseAngle(int angle)
-        {
-            angle = Clamp(angle, 0, MaxServoAngle);
-            _secondaryCloseAngle = angle;
-            if (_connected)
-                _device.SendCommand($"VC{angle}");
-            WriteProfile();
-        }
-
         public int PrimaryOpenAngle => _primaryOpenAngle;
         public int PrimaryCloseAngle => _primaryCloseAngle;
-        public int SecondaryOpenAngle => _secondaryOpenAngle;
-        public int SecondaryCloseAngle => _secondaryCloseAngle;
 
         public int HeaterState => _heaterState;
 
@@ -639,36 +788,6 @@ namespace DarkLight.CoverCalibrator
                 return pos;
             }
             return _primaryCloseAngle;
-        }
-
-        /// <summary>Jog secondary servo directly to a raw angle (0-270). Requires connected.</summary>
-        public int JogSecondary(int angle)
-        {
-            angle = Clamp(angle, 0, MaxServoAngle);
-            if (_connected)
-            {
-                HaltMotionBeforeJog();
-                var resp = _device.SendCommand($"K{angle}");
-                LogMessage("JogSecondary", $"angle={angle} resp={resp}");
-                if (resp != null && resp != "?")
-                    _secondaryCurrentPosition = angle;
-            }
-            return angle;
-        }
-
-        /// <summary>Get secondary servo current physical position. Requires connected.</summary>
-        public int GetSecondaryPosition()
-        {
-            if (_secondaryCurrentPosition.HasValue)
-                return _secondaryCurrentPosition.Value;
-            if (!_connected) return _secondaryCloseAngle;
-            var resp = _device.SendCommand("k");
-            if (resp != null && int.TryParse(resp, out int pos))
-            {
-                _secondaryCurrentPosition = pos;
-                return pos;
-            }
-            return _secondaryCloseAngle;
         }
 
         /// <summary>Save current servo position as the new open angle.</summary>
@@ -727,6 +846,9 @@ namespace DarkLight.CoverCalibrator
 
         private IDeviceConnection CreateDeviceConnection()
         {
+            if (_deviceFactory != null)
+                return _deviceFactory();
+
             return IsTcpTransport ? (IDeviceConnection)new DeviceTcp() : new DeviceSerial();
         }
 
@@ -753,8 +875,6 @@ namespace DarkLight.CoverCalibrator
                 _pollIntervalMs = Convert.ToInt32(profile.GetValue(DriverId, ProfilePollInterval, string.Empty, "1000"), CultureInfo.InvariantCulture);
                 _primaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfilePrimaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
                 _primaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfilePrimaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
-                _secondaryOpenAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfileSecondaryOpenAngle, string.Empty, "0"), CultureInfo.InvariantCulture);
-                _secondaryCloseAngle = Convert.ToInt32(profile.GetValue(DriverId, ProfileSecondaryCloseAngle, string.Empty, "180"), CultureInfo.InvariantCulture);
             }
             LogMessage("ReadProfile", $"Transport={_transport} Serial={_portName}@{_baudRate} TCP={_tcpHost}:{_tcpPort} PO={_primaryOpenAngle} PC={_primaryCloseAngle}");
         }
@@ -772,8 +892,6 @@ namespace DarkLight.CoverCalibrator
                 profile.WriteValue(DriverId, ProfilePollInterval, _pollIntervalMs.ToString(CultureInfo.InvariantCulture));
                 profile.WriteValue(DriverId, ProfilePrimaryOpenAngle, _primaryOpenAngle.ToString(CultureInfo.InvariantCulture));
                 profile.WriteValue(DriverId, ProfilePrimaryCloseAngle, _primaryCloseAngle.ToString(CultureInfo.InvariantCulture));
-                profile.WriteValue(DriverId, ProfileSecondaryOpenAngle, _secondaryOpenAngle.ToString(CultureInfo.InvariantCulture));
-                profile.WriteValue(DriverId, ProfileSecondaryCloseAngle, _secondaryCloseAngle.ToString(CultureInfo.InvariantCulture));
             }
             LogMessage("WriteProfile", "Profile saved");
         }
