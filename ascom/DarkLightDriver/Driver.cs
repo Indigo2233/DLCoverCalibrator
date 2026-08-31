@@ -55,6 +55,7 @@ namespace DarkLight.CoverCalibrator
         private bool _connecting;
         private readonly object _connectionLock = new object();
         private readonly Func<IDeviceConnection> _deviceFactory;
+        private readonly Action<int> _connectionDelay = Thread.Sleep;
         private readonly bool _enablePolling = true;
         private int _refreshInProgress;
         private int _consecutivePollFailures;
@@ -85,9 +86,10 @@ namespace DarkLight.CoverCalibrator
             LogMessage("Driver", "Constructor complete");
         }
 
-        internal Driver(Func<IDeviceConnection> deviceFactory)
+        internal Driver(Func<IDeviceConnection> deviceFactory, Action<int> connectionDelay = null)
         {
             _deviceFactory = deviceFactory ?? throw new ArgumentNullException(nameof(deviceFactory));
+            _connectionDelay = connectionDelay ?? Thread.Sleep;
             _enablePolling = false;
         }
 
@@ -633,7 +635,7 @@ namespace DarkLight.CoverCalibrator
 
                 try { _device?.Close(); } catch { }
                 if (attempt < MaxConnectionAttempts)
-                    Thread.Sleep(ConnectionRetryDelayMs);
+                    _connectionDelay(ConnectionRetryDelayMs);
             }
 
             return false;

@@ -15,6 +15,10 @@ internal static class Program
         Run("DeviceTcp handshake, framing, and response parsing", TestTcpProtocol);
         Run("DeviceSerial recreates the port after a failed handshake", TestSerialHandshakeRecovery);
         Run("DeviceSerial handshake recovery is bounded", TestSerialHandshakeRecoveryIsBounded);
+        Run("DeviceSerial disposes a replacement port that cannot open", TestSerialFailedReplacementOpenIsDisposed);
+        Run("Driver rebuilds the connection for its second connect attempt", TestConnectionRetryRebuildsDevice);
+        Run("ResetDevice recovers the current connection", TestResetDeviceRecoversCurrentConnection);
+        Run("ResetDevice rebuilds the connection when direct recovery fails", TestResetDeviceRebuildsConnection);
         Run("Driver state polling is non-reentrant", TestPollingIsNonReentrant);
         Run("Driver automatically recovers after consecutive polling failures", TestAutomaticRecovery);
         Run("ASCOM connection ignores secondary-servo commands", TestSecondaryServoCommandsAreAbsent);
@@ -115,10 +119,16 @@ internal static class Program
         var firstPort = new FakeSerialPort(null);
         var recoveredPort = new FakeSerialPort("<?>");
         var ports = new Queue<FakeSerialPort>(new[] { firstPort, recoveredPort });
+        var factoryArguments = new List<string>();
+        var delays = new List<int>();
 
         using (var device = new DeviceSerial(
-            (portName, baudRate) => ports.Dequeue(),
-            milliseconds => { }))
+            (portName, baudRate) =>
+            {
+                factoryArguments.Add($"{portName}:{baudRate}");
+                return ports.Dequeue();
+            },
+            milliseconds => delays.Add(milliseconds)))
         {
             device.Open("COM9", 115200);
             Assert(device.Handshake(), "handshake should recover after rebuilding the serial port");
@@ -135,6 +145,15 @@ internal static class Program
         Assert(recoveredPort.WasOpened, "the replacement serial port should be opened");
         Assert(recoveredPort.Writes.Count == 1 && recoveredPort.Writes[0] == "<Z>",
             "the replacement serial port should receive the recovery handshake");
+        Assert(factoryArguments.Count == 2 &&
+               factoryArguments[0] == "COM9:115200" &&
+               factoryArguments[1] == "COM9:115200",
+            "the replacement port should reuse the configured endpoint and baud rate");
+        Assert(delays.Count == 2 && delays[0] == 100 && delays[1] == 1500,
+            "serial recovery should use one DTR pulse delay and one settle delay");
+        Assert(recoveredPort.ReadTimeout == 5000 && recoveredPort.WriteTimeout == 2000 &&
+               !recoveredPort.DtrEnable && !recoveredPort.RtsEnable && recoveredPort.NewLine == "\n",
+            "the replacement port should receive the production serial settings");
     }
 
     private static void TestSerialHandshakeRecoveryIsBounded()
@@ -154,6 +173,85 @@ internal static class Program
         Assert(ports.Count == 0, "handshake should use exactly two serial-port instances");
         Assert(firstPort.Writes.Count == 1 && secondPort.Writes.Count == 1,
             "each serial-port instance should receive exactly one handshake command");
+    }
+
+    private static void TestSerialFailedReplacementOpenIsDisposed()
+    {
+        var firstPort = new FakeSerialPort(null);
+        var replacementPort = new FakeSerialPort(null) { ThrowOnOpen = true };
+        var ports = new Queue<FakeSerialPort>(new[] { firstPort, replacementPort });
+
+        using (var device = new DeviceSerial(
+            (portName, baudRate) => ports.Dequeue(),
+            milliseconds => { }))
+        {
+            device.Open("COM9", 115200);
+            Assert(!device.Handshake(), "handshake should fail when the replacement port cannot open");
+            Assert(!device.IsOpen, "device should remain closed after replacement open failure");
+        }
+
+        Assert(firstPort.WasDisposed, "the original port should be disposed before replacement");
+        Assert(replacementPort.WasDisposed, "a replacement port that fails to open should be disposed");
+    }
+
+    private static void TestConnectionRetryRebuildsDevice()
+    {
+        var firstDevice = new FakeDeviceConnection { HandshakeResult = false };
+        var secondDevice = new FakeDeviceConnection();
+        var devices = new Queue<FakeDeviceConnection>(new[] { firstDevice, secondDevice });
+        var delays = new List<int>();
+
+        using (var driver = new Driver(
+            () => devices.Dequeue(),
+            milliseconds => delays.Add(milliseconds)))
+        {
+            driver.Connect();
+            Assert(driver.Connected, "the second connection attempt should connect the driver");
+            Assert(firstDevice.WasDisposed, "the failed connection instance should be disposed");
+            Assert(firstDevice.OpenCount == 1 && firstDevice.HandshakeCount == 1,
+                "the first connection should receive one bounded attempt");
+            Assert(secondDevice.OpenCount == 1 && secondDevice.HandshakeCount == 1,
+                "the second connection should use a fresh instance and one handshake");
+            Assert(delays.Count == 1 && delays[0] == 1500,
+                "connection recovery should settle exactly once between two attempts");
+        }
+    }
+
+    private static void TestResetDeviceRecoversCurrentConnection()
+    {
+        var device = new FakeDeviceConnection();
+        using (var driver = new Driver(() => device, milliseconds => { }))
+        {
+            driver.Connect();
+            string result = driver.Action("resetdevice", string.Empty);
+
+            Assert(result.StartsWith("OK:", StringComparison.Ordinal),
+                "ResetDevice should report successful direct recovery");
+            Assert(device.RecoveryCount == 1, "ResetDevice should first recover the current connection");
+            Assert(device.OpenCount == 1, "direct recovery should retain the current connection instance");
+            Assert(driver.Connected, "the driver should remain connected after direct recovery");
+        }
+    }
+
+    private static void TestResetDeviceRebuildsConnection()
+    {
+        var firstDevice = new FakeDeviceConnection { RecoverResult = false };
+        var replacementDevice = new FakeDeviceConnection();
+        var devices = new Queue<FakeDeviceConnection>(new[] { firstDevice, replacementDevice });
+
+        using (var driver = new Driver(() => devices.Dequeue(), milliseconds => { }))
+        {
+            driver.Connect();
+            string result = driver.Action("ResetDevice", string.Empty);
+
+            Assert(result.StartsWith("OK:", StringComparison.Ordinal),
+                "ResetDevice should report success after rebuilding the connection");
+            Assert(firstDevice.RecoveryCount == 1 && firstDevice.WasDisposed,
+                "ResetDevice should release the current instance after direct recovery fails");
+            Assert(replacementDevice.OpenCount == 1 && replacementDevice.HandshakeCount == 1,
+                "ResetDevice should open and handshake a fresh connection instance");
+            Assert(driver.Connected, "the driver should reconnect after rebuilding the connection");
+        }
     }
 
     private static void TestPollingIsNonReentrant()
@@ -232,6 +330,7 @@ internal static class Program
         public bool RtsEnable { get; set; }
         public bool WasOpened { get; private set; }
         public bool WasDisposed { get; private set; }
+        public bool ThrowOnOpen { get; set; }
         public List<bool> DtrValues { get; } = new List<bool>();
         public List<string> Writes { get; } = new List<string>();
 
@@ -243,6 +342,8 @@ internal static class Program
 
         public void Open()
         {
+            if (ThrowOnOpen)
+                throw new InvalidOperationException("simulated serial open failure");
             IsOpen = true;
             WasOpened = true;
         }
@@ -286,12 +387,18 @@ internal static class Program
         public int PollsToFail;
         public int RecoveryCount;
         public int BlockedPollCount;
+        public bool HandshakeResult { get; set; } = true;
+        public bool RecoverResult { get; set; } = true;
+        public int OpenCount { get; private set; }
+        public int HandshakeCount { get; private set; }
+        public bool WasDisposed { get; private set; }
         public List<string> Commands { get; } = new List<string>();
         public ManualResetEvent PollEntered { get; } = new ManualResetEvent(false);
         public ManualResetEvent ReleasePoll { get; } = new ManualResetEvent(false);
 
         public void Open(string endpoint, int parameter)
         {
+            OpenCount++;
             IsOpen = true;
         }
 
@@ -330,17 +437,19 @@ internal static class Program
 
         public bool Handshake()
         {
-            return true;
+            HandshakeCount++;
+            return HandshakeResult;
         }
 
         public bool TryRecover()
         {
             Interlocked.Increment(ref RecoveryCount);
-            return true;
+            return RecoverResult;
         }
 
         public void Dispose()
         {
+            WasDisposed = true;
             Close();
             PollEntered.Dispose();
             ReleasePoll.Dispose();
