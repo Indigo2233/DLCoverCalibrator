@@ -10,6 +10,7 @@ internal static class Program
 {
     private static int _failed;
 
+    [STAThread]
     private static int Main()
     {
         Run("DeviceTcp handshake, framing, and response parsing", TestTcpProtocol);
@@ -22,6 +23,7 @@ internal static class Program
         Run("Driver state polling is non-reentrant", TestPollingIsNonReentrant);
         Run("Driver automatically recovers after consecutive polling failures", TestAutomaticRecovery);
         Run("ASCOM connection ignores secondary-servo commands", TestSecondaryServoCommandsAreAbsent);
+        Run("Setup dialog fits common high-DPI working areas", TestSetupDialogFitsHighDpiWorkingAreas);
 
         if (_failed == 0)
         {
@@ -307,6 +309,40 @@ internal static class Program
             Assert(!device.Commands.Contains(command),
                 $"ASCOM driver sent the unsupported secondary-servo command {command}");
         }
+    }
+
+    private static void TestSetupDialogFitsHighDpiWorkingAreas()
+    {
+        using (var driver = new Driver(() => new FakeDeviceConnection(), milliseconds => { }))
+        using (var dialog = new SetupDialogForm(driver))
+        {
+            Assert(dialog.AutoScaleMode == System.Windows.Forms.AutoScaleMode.Dpi,
+                "setup dialog should use DPI scaling");
+            Assert(dialog.AutoScroll, "setup dialog should make clipped controls scrollable");
+
+            AssertDialogFits(dialog, new System.Drawing.Size(760, 503), new System.Drawing.Size(1920, 1040));
+            AssertDialogFits(dialog, new System.Drawing.Size(1140, 755), new System.Drawing.Size(1366, 728));
+            AssertDialogFits(dialog, new System.Drawing.Size(1520, 1006), new System.Drawing.Size(1920, 1040));
+        }
+    }
+
+    private static void AssertDialogFits(
+        SetupDialogForm dialog,
+        System.Drawing.Size desired,
+        System.Drawing.Size workingArea)
+    {
+        const int margin = 16;
+        dialog.Size = desired;
+        dialog.FitToWorkingArea(new System.Drawing.Rectangle(System.Drawing.Point.Empty, workingArea));
+
+        Assert(dialog.Width <= workingArea.Width - (margin * 2),
+            $"dialog width {dialog.Width} exceeds working area {workingArea.Width}");
+        Assert(dialog.Height <= workingArea.Height - (margin * 2),
+            $"dialog height {dialog.Height} exceeds working area {workingArea.Height}");
+        Assert(dialog.Left >= 0 && dialog.Right <= workingArea.Width,
+            "dialog should be horizontally reachable");
+        Assert(dialog.Top >= 0 && dialog.Bottom <= workingArea.Height,
+            "dialog should be vertically reachable");
     }
 
     private static void Assert(bool condition, string message)

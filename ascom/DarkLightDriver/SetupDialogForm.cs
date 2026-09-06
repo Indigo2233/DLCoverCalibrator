@@ -7,6 +7,11 @@ namespace DarkLight.CoverCalibrator
 {
     public class SetupDialogForm : Form
     {
+        private static readonly SizeF DesignDpi = new SizeF(96F, 96F);
+        private static readonly Size DesignClientSize = new Size(744, 464);
+        private static readonly Size MinimumUsableWindowSize = new Size(480, 320);
+        private const int WorkingAreaMargin = 16;
+
         private readonly Driver _driver;
         private bool _syncingBrightness;
 
@@ -54,8 +59,15 @@ namespace DarkLight.CoverCalibrator
 
         private void InitializeComponent()
         {
+            SuspendLayout();
+
+            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = DesignDpi;
+            AutoScroll = true;
+            AutoScrollMargin = new Size(12, 12);
+            AutoScrollMinSize = new Size(732, 460);
             Text = "DarkLight Cover Calibrator — Setup";
-            Size = new Size(760, 575);
+            ClientSize = DesignClientSize;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -177,11 +189,37 @@ namespace DarkLight.CoverCalibrator
             Controls.Add(btnDone);
 
             AcceptButton = btnDone;
+            Shown += (s, e) => FitToWorkingArea();
 
             foreach (Control c in GetAllControls(this))
             {
                 if (c is Button btn) AttachHover(btn);
             }
+
+            ResumeLayout(false);
+        }
+
+        private void FitToWorkingArea()
+        {
+            FitToWorkingArea(Screen.FromControl(this).WorkingArea);
+        }
+
+        internal void FitToWorkingArea(Rectangle workingArea)
+        {
+            Size fittedSize = SetupDialogLayout.FitWindowToWorkingArea(
+                Size,
+                workingArea.Size,
+                WorkingAreaMargin,
+                MinimumUsableWindowSize);
+
+            if (Size != fittedSize)
+            {
+                Size = fittedSize;
+            }
+
+            Location = new Point(
+                workingArea.Left + Math.Max(0, (workingArea.Width - Width) / 2),
+                workingArea.Top + Math.Max(0, (workingArea.Height - Height) / 2));
         }
 
         private void CreateDeviceControlPanel(GroupBox parent)
