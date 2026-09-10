@@ -30,6 +30,8 @@
 ├── dlc_firmware/          Arduino 固件
 │   ├── dlc_firmware.ino   主程序
 │   └── DLC_Library/       依赖库 (舵机/传感器/EEPROM)
+├── esp8266_lenscap/       ESP8266 无线电动镜头盖固件
+│   └── README.md           NodeMCU / Wemos 接线、刷写与 WiFi 使用说明
 ├── ascom/                 ASCOM 驱动 (Windows)
 │   ├── DarkLightDriver/   🆕 自定义开源驱动 (C#)
 │   └── *.msi/*.exe        原版闭源驱动
@@ -48,6 +50,10 @@
 ---
 
 ## 🚀 快速开始
+
+### ESP8266 无线镜头盖
+
+使用 NodeMCU 或 Wemos D1 Mini 驱动舵机时，请参阅 [ESP8266 镜头盖固件说明](esp8266_lenscap/README.md)。
 
 ### 1. 刷固件
 用 Arduino IDE 打开 `dlc_firmware/dlc_firmware.ino`，按需修改配置后上传。详见 [固件指南](docs/firmware.md)。
